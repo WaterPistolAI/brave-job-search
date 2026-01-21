@@ -9,8 +9,6 @@ import logging
 from datetime import datetime
 from dotenv import load_dotenv
 
-logging.basicConfig(level=logging.INFO)
-
 load_dotenv()
 
 # --- CONFIGURATION ---
@@ -22,8 +20,18 @@ BRAVE_BASE_URL = os.environ.get(
     "BRAVE_BASE_URL", "https://api.search.brave.com/res/v1/web/search"
 )
 BRAVE_USAGE_FILE = os.environ.get("USAGE_FILE", "api_usage.json")
+BRAVE_RATE_LIMIT = float(os.environ.get("BRAVE_RATE_LIMIT", "1.1"))
 BRAVE_MONTHLY_LIMIT = int(os.environ.get("BRAVE_MONTHLY_LIMIT", "2000"))
+BRAVE_JOB_SEARCH_LOGFILE = os.environ.get(
+    "BRAVE_JOB_SEARCH_LOGFILE", "brave-job-search.log"
+)
 
+logging.basicConfig(
+    level=logging.INFO,
+    filename=BRAVE_JOB_SEARCH_LOGFILE,
+    filemode="a",
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 def load_list_from_env(key, default_val):
     raw_value = os.environ.get(key)
@@ -75,7 +83,7 @@ def fetch_brave_jobs(query):
     params = {"q": query}
 
     # Respect the 1 req/sec limit strictly
-    time.sleep(1.1)
+    time.sleep(BRAVE_RATE_LIMIT)
 
     try:
         response = httpx.get(BRAVE_BASE_URL, headers=headers, params=params)
@@ -138,8 +146,8 @@ def main():
                         }
                     )
 
-    with open("job_results.json", "w") as f:
-        json.dump(all_jobs, f, indent=4)
+    with open("job_results.json", "w", encoding="utf-8") as f:
+        json.dump(all_jobs, f, indent=4, ensure_ascii=False)
 
 
 if __name__ == "__main__":
