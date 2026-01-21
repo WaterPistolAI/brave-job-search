@@ -25,6 +25,7 @@ BRAVE_MONTHLY_LIMIT = int(os.environ.get("BRAVE_MONTHLY_LIMIT", "2000"))
 BRAVE_JOB_SEARCH_LOGFILE = os.environ.get(
     "BRAVE_JOB_SEARCH_LOGFILE", "brave-job-search.log"
 )
+BRAVE_FRESHNESS = os.environ.get("BRAVE_FRESHNESS", "pd")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,7 +48,11 @@ def load_list_from_env(key, default_val):
 
 BRAVE_ATS_DOMAINS = load_list_from_env("BRAVE_ATS_DOMAINS", ["boards.greenhouse.io"])
 BRAVE_TARGET_QUERIES = load_list_from_env(
-    "BRAVE_TARGET_QUERIES", ['"Founding Engineer"']
+    "BRAVE_TARGET_QUERIES",
+    [
+        "(GenAI | Generative AI | LLM) (Engineer | Developer)",
+        "(Developer Advocacy | Developer Relations | DevRel | Developer Advocate)",
+    ],
 )
 
 
@@ -80,7 +85,9 @@ def fetch_brave_jobs(query):
         "Accept-Encoding": "gzip",
         "X-Subscription-Token": BRAVE_API_KEY,
     }
-    params = {"q": query}
+    params = {"q": query, "count": 20}
+    if "site:" not in query:
+        params["freshness"] = BRAVE_FRESHNESS
 
     # Respect the 1 req/sec limit strictly
     time.sleep(BRAVE_RATE_LIMIT)
