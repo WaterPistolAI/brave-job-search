@@ -21,7 +21,7 @@ A high-efficiency Python script that uses the **Brave Search API** to search acr
 ### 1. Prerequisites
 
 * Python 3.8+
-* A Brave Search API Key ([Get it here](https://www.google.com/search?q=https://api.search.brave.com/app/dashboard))
+* A Brave Search API Key ([Get it here](https://api-dashboard.search.brave.com/app/dashboard))
 
 ### 2. Installation
 
