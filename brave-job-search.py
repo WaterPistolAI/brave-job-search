@@ -3,8 +3,13 @@ import json
 import time
 import os
 import ast
+import html
+import re
+import logging
 from datetime import datetime
 from dotenv import load_dotenv
+
+logging.basicConfig(level=logging.INFO)
 
 load_dotenv()
 
@@ -117,16 +122,19 @@ def main():
             # Combining the wildcard/OR string with the site restriction
             full_query = f"site:{domain} {query_string}"
 
-            print(f"Searching: {full_query}")
+            logging.info(f"Searching: {full_query}")
             results = fetch_brave_jobs(full_query)
+            logging.info(f"Found {len(results)} results for {full_query}")
 
             if results:
                 for res in results:
+                    snippet = html.unescape(res.get("description", ""))
+                    snippet = re.sub(r"<[^>]+>", "", snippet)
                     all_jobs.append(
                         {
                             "title": res.get("title"),
                             "url": res.get("url"),
-                            "snippet": res.get("description"),
+                            "snippet": snippet,
                         }
                     )
 
