@@ -841,16 +841,18 @@ def analyze_resume_and_rank_jobs(n_results=10):
             # Create prompt for LLM
             prompt = f"""Analyze the following resume and cover letter to identify the candidate's key qualifications, skills, experience, and career goals. Then generate 5-7 specific search queries that would be most effective for finding relevant job listings.
 
+IMPORTANT: Keep your analysis CONCISE (3-4 sentences maximum). Focus on the most important qualifications and career goals. Do not cut off mid-sentence. Ensure your analysis is fully finished before generating the search queries.
+
 RESUME:
-{resume_text[:3000]}
+{resume_text[:25000]}
 
 COVER LETTER:
-{cover_letter_text[:2000] if cover_letter_text else "No cover letter provided"}
+{cover_letter_text[:20000] if cover_letter_text else "No cover letter provided"}
 
 Please provide your analysis in the following format:
 
 ANALYSIS:
-[Brief summary of the candidate's profile, key skills, experience level, and career goals]
+[3-4 sentence summary of the candidate's profile, key skills, experience level, and career goals]
 
 SEARCH QUERIES:
 1. [Query 1]
@@ -874,7 +876,7 @@ Make the queries specific and targeted, focusing on the candidate's unique combi
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.7,
-                max_tokens=1500,
+                max_tokens=16384,
             )
 
             llm_response = response.choices[0].message.content
@@ -1953,7 +1955,7 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 )
 
             with gr.Row():
-                match_status = gr.Textbox(label="Status", interactive=False, lines=3)
+                match_status = gr.Textbox(label="Status", interactive=False, lines=20)
 
             with gr.Row():
                 match_results = gr.Dataframe(
@@ -2089,7 +2091,6 @@ with gr.Blocks(title="Job Search Manager") as demo:
                     chat_history = gr.Chatbot(
                         label="Conversation",
                         height=500,
-                        show_copy_button=True,
                     )
 
                     # Chat input
