@@ -64,16 +64,15 @@ SUPPORTED_ATS_DOMAINS = {
             },
         ],
     },
-    "apply.workable.com": {
+    "jobs.workable.com": {
         "name": "Workable",
         "description": "Workable ATS",
         "scraping_adapter": "WorkableAdapter",
         "expired_selectors": [
             {
-                "selector": "body div#app div section div h2[id^='workable-section-'][class*='styles--']",
-                "text_pattern": "available positions at",
+                "selector": "div#app div.jobUnavailable__container h1 strong",
+                "text": "This job is not available anymore",
                 "case_sensitive": False,
-                "pattern_type": "contains",
             },
         ],
     },

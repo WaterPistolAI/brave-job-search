@@ -466,7 +466,7 @@ def convert_html_to_markdown(html_content: str) -> str:
 
 def scrape_job_with_markdown(url: str, html_content: str) -> Dict:
     """
-    Scrape job details from HTML content and convert to markdown.
+    Scrape job details from HTML content using domain-specific adapters.
     Returns a dictionary with job details.
     """
     details = {
@@ -486,13 +486,8 @@ def scrape_job_with_markdown(url: str, html_content: str) -> Dict:
         logging.info(f"Using adapter '{adapter.__class__.__name__}' for {url}")
 
         # Use the adapter to scrape the job details
+        # The adapter already extracts clean text from specific divs
         details = adapter.scrape(soup, url)
-
-        # Convert job description to markdown if it exists
-        if details.get("job_description"):
-            # Try to find the job description section in the HTML
-            # and convert it to markdown
-            details["job_description"] = convert_html_to_markdown(html_content)
 
         logging.info(f"Successfully scraped job from {url}")
         return details

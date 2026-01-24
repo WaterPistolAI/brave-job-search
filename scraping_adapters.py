@@ -368,6 +368,307 @@ class SmartRecruitersAdapter(BaseScraperAdapter):
         return details
 
 
+class WorkableAdapter(BaseScraperAdapter):
+    """Adapter for Workable job boards (jobs.workable.com)."""
+
+    def __init__(self):
+        super().__init__()
+        self.domain = "jobs.workable.com"
+
+    def can_handle(self, url: str) -> bool:
+        return "jobs.workable.com" in url or "workable.com" in url
+
+    def scrape(self, soup: BeautifulSoup, url: str) -> Dict:
+        details = {
+            "job_description": "",
+            "requirements": "",
+            "benefits": "",
+            "location": "",
+            "company": "",
+            "salary": "",
+        }
+
+        # Extract company name from the company link
+        company_link = soup.find("a", class_=lambda x: x and "companyName__link" in x)
+        if company_link:
+            details["company"] = self._clean_text(company_link.get_text())
+
+        # Fallback: extract company name from URL
+        if not details["company"]:
+            company_match = re.search(r"jobs\.workable\.com/([^/]+)", url)
+            if company_match:
+                details["company"] = company_match.group(1).replace("-", " ").title()
+
+        # Extract location from data-ui attribute
+        location_elem = soup.find("span", {"data-ui": "overview-location"})
+        if location_elem:
+            details["location"] = self._clean_text(location_elem.get_text())
+
+        # Extract job description from parsed HTML content
+        desc_content = soup.find(
+            "div", {"data-ui": "job-breakdown-description-parsed-html"}
+        )
+        if desc_content:
+            details["job_description"] = self._clean_text(desc_content.get_text())
+
+        # Extract requirements - look for section with "requirement" or "qualification" in heading
+        sections = soup.find_all("section")
+        for section in sections:
+            heading = section.find("h3")
+            if heading:
+                heading_text = heading.get_text().lower()
+                if any(
+                    keyword in heading_text
+                    for keyword in [
+                        "requirement",
+                        "qualification",
+                        "what we'd love to see",
+                    ]
+                ):
+                    content = section.find(
+                        "div", class_=lambda x: x and "parsedHtml__content" in x
+                    )
+                    if content:
+                        details["requirements"] = self._clean_text(content.get_text())
+                        break
+
+        # Extract benefits - look for section with "benefit" or "what we offer" in heading
+        for section in sections:
+            heading = section.find("h3")
+            if heading:
+                heading_text = heading.get_text().lower()
+                if any(
+                    keyword in heading_text
+                    for keyword in ["benefit", "what we offer", "what we offer"]
+                ):
+                    content = section.find(
+                        "div", class_=lambda x: x and "parsedHtml__content" in x
+                    )
+                    if content:
+                        details["benefits"] = self._clean_text(content.get_text())
+                        break
+
+        # Salary - look for salary information in the job details
+        salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
+        for keyword in salary_keywords:
+            element = soup.find(
+                text=lambda text: text and keyword.lower() in text.lower()
+            )
+            if element:
+                parent = element.parent
+                if parent:
+                    text = self._clean_text(parent.get_text())
+                    if "$" in text or any(c.isdigit() for c in text):
+                        details["salary"] = text
+                        break
+
+        return details
+
+
+class JobviteAdapter(BaseScraperAdapter):
+    """Adapter for Jobvite job boards (careers.jobvite.com)."""
+
+    def __init__(self):
+        super().__init__()
+        self.domain = "careers.jobvite.com"
+
+    def can_handle(self, url: str) -> bool:
+        return "careers.jobvite.com" in url or "jobvite.com" in url
+
+    def scrape(self, soup: BeautifulSoup, url: str) -> Dict:
+        details = {
+            "job_description": "",
+            "requirements": "",
+            "benefits": "",
+            "location": "",
+            "company": "",
+            "salary": "",
+        }
+
+        # Extract company name from URL
+        company_match = re.search(r"careers\.jobvite\.com/([^/]+)", url)
+        if company_match:
+            details["company"] = company_match.group(1).replace("-", " ").title()
+
+        # Jobvite uses specific data attributes
+        # Job description
+        desc_elem = soup.find("div", {"data-testid": "job-description"}) or soup.find(
+            "div", class_="job-description"
+        )
+        if desc_elem:
+            details["job_description"] = self._clean_text(desc_elem.get_text())
+
+        # Requirements
+        req_elem = soup.find("div", {"data-testid": "requirements"}) or soup.find(
+            "div", class_="requirements"
+        )
+        if req_elem:
+            details["requirements"] = self._clean_text(req_elem.get_text())
+
+        # Location
+        location_elem = soup.find("div", {"data-testid": "location"}) or soup.find(
+            "span", class_="location"
+        )
+        if location_elem:
+            details["location"] = self._clean_text(location_elem.get_text())
+
+        # Salary
+        salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
+        for keyword in salary_keywords:
+            element = soup.find(
+                text=lambda text: text and keyword.lower() in text.lower()
+            )
+            if element:
+                parent = element.parent
+                if parent:
+                    text = self._clean_text(parent.get_text())
+                    if "$" in text or any(c.isdigit() for c in text):
+                        details["salary"] = text
+                        break
+
+        return details
+
+
+class ICIMSAdapter(BaseScraperAdapter):
+    """Adapter for iCIMS job boards (my.icims.com)."""
+
+    def __init__(self):
+        super().__init__()
+        self.domain = "my.icims.com"
+
+    def can_handle(self, url: str) -> bool:
+        return "my.icims.com" in url or "icims.com" in url
+
+    def scrape(self, soup: BeautifulSoup, url: str) -> Dict:
+        details = {
+            "job_description": "",
+            "requirements": "",
+            "benefits": "",
+            "location": "",
+            "company": "",
+            "salary": "",
+        }
+
+        # iCIMS uses specific data attributes and classes
+        # Job description
+        desc_elem = soup.find(
+            "div", {"data-automation-id": "jobDescription"}
+        ) or soup.find("div", class_="job-description")
+        if desc_elem:
+            details["job_description"] = self._clean_text(desc_elem.get_text())
+
+        # Requirements
+        req_elem = soup.find(
+            "div", {"data-automation-id": "qualifications"}
+        ) or soup.find("div", class_="qualifications")
+        if req_elem:
+            details["requirements"] = self._clean_text(req_elem.get_text())
+
+        # Location
+        location_elem = soup.find(
+            "div", {"data-automation-id": "location"}
+        ) or soup.find("span", class_="location")
+        if location_elem:
+            details["location"] = self._clean_text(location_elem.get_text())
+
+        # Company
+        company_elem = soup.find("div", class_="company-name") or soup.find(
+            "span", class_="company"
+        )
+        if company_elem:
+            details["company"] = self._clean_text(company_elem.get_text())
+
+        # Salary
+        salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
+        for keyword in salary_keywords:
+            element = soup.find(
+                text=lambda text: text and keyword.lower() in text.lower()
+            )
+            if element:
+                parent = element.parent
+                if parent:
+                    text = self._clean_text(parent.get_text())
+                    if "$" in text or any(c.isdigit() for c in text):
+                        details["salary"] = text
+                        break
+
+        return details
+
+
+class LevelsFYIAdapter(BaseScraperAdapter):
+    """Adapter for Levels.fyi job boards."""
+
+    def __init__(self):
+        super().__init__()
+        self.domain = "levels.fyi"
+
+    def can_handle(self, url: str) -> bool:
+        return "levels.fyi" in url
+
+    def scrape(self, soup: BeautifulSoup, url: str) -> Dict:
+        details = {
+            "job_description": "",
+            "requirements": "",
+            "benefits": "",
+            "location": "",
+            "company": "",
+            "salary": "",
+        }
+
+        # Levels.fyi has a specific structure
+        # Job description
+        desc_elem = soup.find("div", class_="job-description") or soup.find(
+            "div", {"data-testid": "job-description"}
+        )
+        if desc_elem:
+            details["job_description"] = self._clean_text(desc_elem.get_text())
+
+        # Requirements
+        req_elem = soup.find("div", class_="requirements") or soup.find(
+            "div", {"data-testid": "requirements"}
+        )
+        if req_elem:
+            details["requirements"] = self._clean_text(req_elem.get_text())
+
+        # Location
+        location_elem = soup.find("div", class_="location") or soup.find(
+            "span", class_="location"
+        )
+        if location_elem:
+            details["location"] = self._clean_text(location_elem.get_text())
+
+        # Company
+        company_elem = soup.find("div", class_="company-name") or soup.find(
+            "span", class_="company"
+        )
+        if company_elem:
+            details["company"] = self._clean_text(company_elem.get_text())
+
+        # Salary - Levels.fyi often has salary information prominently
+        salary_elem = soup.find("div", class_="salary") or soup.find(
+            "div", {"data-testid": "salary"}
+        )
+        if salary_elem:
+            details["salary"] = self._clean_text(salary_elem.get_text())
+
+        # If no salary element found, try to find it in the text
+        if not details["salary"]:
+            salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
+            for keyword in salary_keywords:
+                element = soup.find(
+                    text=lambda text: text and keyword.lower() in text.lower()
+                )
+                if element:
+                    parent = element.parent
+                    if parent:
+                        text = self._clean_text(parent.get_text())
+                        if "$" in text or any(c.isdigit() for c in text):
+                            details["salary"] = text
+                            break
+
+        return details
+
+
 class GenericAdapter(BaseScraperAdapter):
     """Generic adapter for job boards without specific adapters."""
 
@@ -505,6 +806,10 @@ class AdapterRegistry:
         self.register_adapter(LeverAdapter())
         self.register_adapter(WorkdayAdapter())
         self.register_adapter(SmartRecruitersAdapter())
+        self.register_adapter(WorkableAdapter())
+        self.register_adapter(JobviteAdapter())
+        self.register_adapter(ICIMSAdapter())
+        self.register_adapter(LevelsFYIAdapter())
         self.register_adapter(
             GenericAdapter()
         )  # Always register generic last as fallback

@@ -201,7 +201,7 @@ def main():
     parser.add_argument(
         "--ats-domains",
         type=str,
-        default='["jobs.ashbyhq.com", "boards.greenhouse.io", "jobs.lever.co", "jobs.smartrecruiters.com", "apply.workable.com", "wd1.myworkdayjobs.com", "jobs.jobvite.com", "careers.icims.com", "www.levels.fyi/jobs"]',
+        default='["jobs.ashbyhq.com", "boards.greenhouse.io", "jobs.lever.co", "jobs.smartrecruiters.com", "jobs.workable.com", "wd1.myworkdayjobs.com", "jobs.jobvite.com", "careers.icims.com", "www.levels.fyi/jobs"]',
         help="JSON array of ATS domains to search",
     )
     parser.add_argument(
