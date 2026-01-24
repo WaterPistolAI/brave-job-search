@@ -3,3 +3,6 @@
 *.json
 *.log
 .output
+.chroma
+__pycache__
+*.db
