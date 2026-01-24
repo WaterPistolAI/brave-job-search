@@ -82,18 +82,18 @@ SUPPORTED_ATS_DOMAINS = {
             },
         ],
     },
-    "careers.icims.com": {
-        "name": "iCIMS",
-        "description": "iCIMS ATS",
-        "scraping_adapter": "IcimsAdapter",
-        "expired_selectors": [
-            {
-                "selector": "html#ng-app.no-js.rms-node.overthrow-enabled body.careers-home.external div#all-content.snap-content div.jibe-container.not-found-container div.not-found-content h2",
-                "text": "the page you are looking for no longer exists",
-                "case_sensitive": False,
-            },
-        ],
-    },
+    # "careers.icims.com": {
+    #     "name": "iCIMS",
+    #     "description": "iCIMS ATS",
+    #     "scraping_adapter": "IcimsAdapter",
+    #     "expired_selectors": [
+    #         {
+    #             "selector": "html#ng-app.no-js.rms-node.overthrow-enabled body.careers-home.external div#all-content.snap-content div.jibe-container.not-found-container div.not-found-content h2",
+    #             "text": "the page you are looking for no longer exists",
+    #             "case_sensitive": False,
+    #         },
+    #     ],
+    # },
     "www.levels.fyi/jobs": {
         "name": "Levels.fyi",
         "description": "Levels.fyi Job Board (jobs endpoint only)",

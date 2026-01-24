@@ -755,20 +755,45 @@ class JobviteAdapter(BaseScraperAdapter):
             "salary": "",
         }
 
-        # Extract company name from URL
-        company_match = re.search(r"careers\.jobvite\.com/([^/]+)", url)
-        if company_match:
-            details["company"] = company_match.group(1).replace("-", " ").title()
+        # Extract company name from og:title meta tag
+        # Format: "Power Integrations is looking for Staff Field Application Engineer."
+        og_title = soup.find("meta", property="og:title")
+        if og_title:
+            title_text = og_title.get("content", "")
+            # Extract company name (everything before " is looking for")
+            if " is looking for " in title_text:
+                details["company"] = title_text.split(" is looking for ")[0].strip()
+            elif " is hiring " in title_text:
+                details["company"] = title_text.split(" is hiring ")[0].strip()
+            else:
+                # Fallback: use the first part of the title
+                details["company"] = title_text.split()[0] if title_text else ""
+
+        # Fallback: extract company name from URL
+        if not details["company"]:
+            company_match = re.search(r"careers\.jobvite\.com/([^/]+)", url)
+            if company_match:
+                details["company"] = company_match.group(1).replace("-", " ").title()
 
         # Extract location from job detail meta
+        # Format: "Sales<span class="jv-inline-separator"></span>San Jose, California"
         meta_elem = soup.find("p", class_="jv-job-detail-meta")
         if meta_elem:
-            # The meta contains department and location separated by separator
-            meta_text = self._clean_text(meta_elem.get_text())
-            # Try to extract location (usually the second part after separator)
-            parts = meta_text.split("\n")
-            if len(parts) > 1:
-                details["location"] = self._clean_text(parts[-1])
+            # Get all text nodes, excluding the separator
+            text_parts = []
+            for child in meta_elem.children:
+                if child.name is None:  # Text node
+                    text_parts.append(child.strip())
+
+            # Location is typically the last text part (after the separator)
+            if len(text_parts) >= 2:
+                details["location"] = text_parts[-1]
+            elif len(text_parts) == 1:
+                # If only one part, check if it contains location info
+                text = text_parts[0]
+                # Try to extract location (usually after a comma or separator)
+                if "," in text:
+                    details["location"] = text.split(",")[-1].strip()
 
         # Extract job description from jv-job-detail-description div
         desc_elem = soup.find("div", class_="jv-job-detail-description")
@@ -830,141 +855,141 @@ class JobviteAdapter(BaseScraperAdapter):
         return details
 
 
-class ICIMSAdapter(BaseScraperAdapter):
-    """Adapter for iCIMS job boards (my.icims.com)."""
+# class ICIMSAdapter(BaseScraperAdapter):
+#     """Adapter for iCIMS job boards (my.icims.com)."""
 
-    def __init__(self):
-        super().__init__()
-        self.domain = "my.icims.com"
+#     def __init__(self):
+#         super().__init__()
+#         self.domain = "my.icims.com"
 
-    def can_handle(self, url: str) -> bool:
-        return "my.icims.com" in url or "icims.com" in url
+#     def can_handle(self, url: str) -> bool:
+#         return "my.icims.com" in url or "icims.com" in url
 
-    def scrape(self, soup: BeautifulSoup, url: str) -> Dict:
-        details = {
-            "job_description": "",
-            "requirements": "",
-            "benefits": "",
-            "location": "",
-            "company": "",
-            "salary": "",
-        }
+#     def scrape(self, soup: BeautifulSoup, url: str) -> Dict:
+#         details = {
+#             "job_description": "",
+#             "requirements": "",
+#             "benefits": "",
+#             "location": "",
+#             "company": "",
+#             "salary": "",
+#         }
 
-        # iCIMS uses specific class structure with potentially dynamic suffixes
-        # Main job content container - handle dynamic class names like iCIMS_ff147
-        job_content = (
-            soup.find("div", class_=lambda x: x and "iCIMS_JobContent" in x)
-            or soup.find("div", class_=lambda x: x and "iCIMS_JobContainer" in x)
-            or soup.find("div", class_=lambda x: x and "iCIMS_JobPage" in x)
-        )
+#         # iCIMS uses specific class structure with potentially dynamic suffixes
+#         # Main job content container - handle dynamic class names like iCIMS_ff147
+#         job_content = (
+#             soup.find("div", class_=lambda x: x and "iCIMS_JobContent" in x)
+#             or soup.find("div", class_=lambda x: x and "iCIMS_JobContainer" in x)
+#             or soup.find("div", class_=lambda x: x and "iCIMS_JobPage" in x)
+#         )
 
-        # Extract company name from job header tags
-        company_elem = None
-        if job_content:
-            # Look for Company field in header tags
-            header_tags = job_content.find_all(
-                "dt", class_=lambda x: x and "iCIMS_JobHeaderField" in x
-            )
-            for tag in header_tags:
-                if tag.get_text().strip() == "Company":
-                    company_elem = tag.find_next_sibling(
-                        "dd", class_=lambda x: x and "iCIMS_JobHeaderData" in x
-                    )
-                    if company_elem:
-                        details["company"] = self._clean_text(company_elem.get_text())
-                        break
+#         # Extract company name from job header tags
+#         company_elem = None
+#         if job_content:
+#             # Look for Company field in header tags
+#             header_tags = job_content.find_all(
+#                 "dt", class_=lambda x: x and "iCIMS_JobHeaderField" in x
+#             )
+#             for tag in header_tags:
+#                 if tag.get_text().strip() == "Company":
+#                     company_elem = tag.find_next_sibling(
+#                         "dd", class_=lambda x: x and "iCIMS_JobHeaderData" in x
+#                     )
+#                     if company_elem:
+#                         details["company"] = self._clean_text(company_elem.get_text())
+#                         break
 
-        # Fallback: extract company from URL
-        if not details["company"]:
-            company_match = re.search(r"//([^/]+)\.icims\.com", url)
-            if company_match:
-                details["company"] = company_match.group(1).replace("-", " ").title()
+#         # Fallback: extract company from URL
+#         if not details["company"]:
+#             company_match = re.search(r"//([^/]+)\.icims\.com", url)
+#             if company_match:
+#                 details["company"] = company_match.group(1).replace("-", " ").title()
 
-        # Extract location from header section
-        if job_content:
-            # Look for location in the header left section
-            location_container = job_content.find(
-                "div", class_=lambda x: x and "header left" in x
-            )
-            if location_container:
-                # Location is typically in a span after the "Job Location" label
-                spans = location_container.find_all("span")
-                for span in spans:
-                    text = self._clean_text(span.get_text())
-                    # Skip the label and get the actual location
-                    if text and "Job Location" not in text:
-                        details["location"] = text
-                        break
+#         # Extract location from header section
+#         if job_content:
+#             # Look for location in the header left section
+#             location_container = job_content.find(
+#                 "div", class_=lambda x: x and "header left" in x
+#             )
+#             if location_container:
+#                 # Location is typically in a span after the "Job Location" label
+#                 spans = location_container.find_all("span")
+#                 for span in spans:
+#                     text = self._clean_text(span.get_text())
+#                     # Skip the label and get the actual location
+#                     if text and "Job Location" not in text:
+#                         details["location"] = text
+#                         break
 
-        # Extract job description from iCIMS_InfoMsg sections
-        # Look for sections with specific headers
-        info_sections = (
-            job_content.find_all(
-                "h2", class_=lambda x: x and "iCIMS_InfoField_Job" in x
-            )
-            if job_content
-            else []
-        )
+#         # Extract job description from iCIMS_InfoMsg sections
+#         # Look for sections with specific headers
+#         info_sections = (
+#             job_content.find_all(
+#                 "h2", class_=lambda x: x and "iCIMS_InfoField_Job" in x
+#             )
+#             if job_content
+#             else []
+#         )
 
-        for section_header in info_sections:
-            header_text = self._clean_text(section_header.get_text()).lower()
+#         for section_header in info_sections:
+#             header_text = self._clean_text(section_header.get_text()).lower()
 
-            # Get the content div that follows this header
-            content_div = section_header.find_next_sibling(
-                "div", class_=lambda x: x and "iCIMS_InfoMsg_Job" in x
-            )
+#             # Get the content div that follows this header
+#             content_div = section_header.find_next_sibling(
+#                 "div", class_=lambda x: x and "iCIMS_InfoMsg_Job" in x
+#             )
 
-            if content_div:
-                # Get text from the expandable text container
-                expandable_text = content_div.find(
-                    "div", class_=lambda x: x and "iCIMS_Expandable_Text" in x
-                )
-                if expandable_text:
-                    section_content = self._clean_text(expandable_text.get_text())
+#             if content_div:
+#                 # Get text from the expandable text container
+#                 expandable_text = content_div.find(
+#                     "div", class_=lambda x: x and "iCIMS_Expandable_Text" in x
+#                 )
+#                 if expandable_text:
+#                     section_content = self._clean_text(expandable_text.get_text())
 
-                    # Categorize based on header text
-                    if "job summary" in header_text or "description" in header_text:
-                        details["job_description"] = section_content
-                    elif "requirement" in header_text or "qualification" in header_text:
-                        details["requirements"] = section_content
-                    elif "benefit" in header_text or "what we offer" in header_text:
-                        details["benefits"] = section_content
+#                     # Categorize based on header text
+#                     if "job summary" in header_text or "description" in header_text:
+#                         details["job_description"] = section_content
+#                     elif "requirement" in header_text or "qualification" in header_text:
+#                         details["requirements"] = section_content
+#                     elif "benefit" in header_text or "what we offer" in header_text:
+#                         details["benefits"] = section_content
 
-        # If we didn't find structured sections, try to extract from all info messages
-        if not details["job_description"]:
-            info_msgs = (
-                job_content.find_all(
-                    "div", class_=lambda x: x and "iCIMS_InfoMsg_Job" in x
-                )
-                if job_content
-                else []
-            )
-            if info_msgs:
-                # Use the first info message as job description
-                first_msg = info_msgs[0]
-                expandable_text = first_msg.find(
-                    "div", class_=lambda x: x and "iCIMS_Expandable_Text" in x
-                )
-                if expandable_text:
-                    details["job_description"] = self._clean_text(
-                        expandable_text.get_text()
-                    )
+#         # If we didn't find structured sections, try to extract from all info messages
+#         if not details["job_description"]:
+#             info_msgs = (
+#                 job_content.find_all(
+#                     "div", class_=lambda x: x and "iCIMS_InfoMsg_Job" in x
+#                 )
+#                 if job_content
+#                 else []
+#             )
+#             if info_msgs:
+#                 # Use the first info message as job description
+#                 first_msg = info_msgs[0]
+#                 expandable_text = first_msg.find(
+#                     "div", class_=lambda x: x and "iCIMS_Expandable_Text" in x
+#                 )
+#                 if expandable_text:
+#                     details["job_description"] = self._clean_text(
+#                         expandable_text.get_text()
+#                     )
 
-        # Salary - look for salary information in the content
-        salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
-        for keyword in salary_keywords:
-            element = soup.find(
-                text=lambda text: text and keyword.lower() in text.lower()
-            )
-            if element:
-                parent = element.parent
-                if parent:
-                    text = self._clean_text(parent.get_text())
-                    if "$" in text or any(c.isdigit() for c in text):
-                        details["salary"] = text
-                        break
+#         # Salary - look for salary information in the content
+#         salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
+#         for keyword in salary_keywords:
+#             element = soup.find(
+#                 text=lambda text: text and keyword.lower() in text.lower()
+#             )
+#             if element:
+#                 parent = element.parent
+#                 if parent:
+#                     text = self._clean_text(parent.get_text())
+#                     if "$" in text or any(c.isdigit() for c in text):
+#                         details["salary"] = text
+#                         break
 
-        return details
+#         return details
 
 
 class LevelsFYIAdapter(BaseScraperAdapter):
@@ -1265,7 +1290,7 @@ class AdapterRegistry:
         self.register_adapter(SmartRecruitersAdapter())
         self.register_adapter(WorkableAdapter())
         self.register_adapter(JobviteAdapter())
-        self.register_adapter(ICIMSAdapter())
+        # self.register_adapter(ICIMSAdapter())
         self.register_adapter(LevelsFYIAdapter())
         self.register_adapter(
             GenericAdapter()
