@@ -460,6 +460,11 @@ def run_job_search():
 
         output_buffer = io.StringIO()
 
+        # Reload environment variables to get latest configuration
+        from dotenv import load_dotenv
+
+        load_dotenv(override=True)
+
         # Check which search providers to use
         search_providers_str = os.environ.get("SEARCH_PROVIDERS", "brave")
         search_providers = [
@@ -477,6 +482,10 @@ def run_job_search():
 
                 google_search.main()
             else:
+                # Reload brave_job_search module to get latest environment variables
+                import importlib
+
+                importlib.reload(brave_job_search)
                 brave_job_search.main()
 
         output = output_buffer.getvalue()
