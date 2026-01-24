@@ -2194,8 +2194,14 @@ with gr.Blocks(title="Job Search Manager") as demo:
 
                 # Create chat history with pros/cons first, then cover letter
                 chat_history = [
-                    (None, f"## 📋 Analysis for Job #{job_id}\n\n{job_dict['title']} at {job_dict['company']}\n\n{analysis}"),
-                    (None, f"## 📄 Personalized Cover Letter\n\n{cover_letter}"),
+                    {
+                        "role": "assistant",
+                        "content": f"## 📋 Analysis for Job #{job_id}\n\n{job_dict['title']} at {job_dict['company']}\n\n{analysis}",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": f"## 📄 Personalized Cover Letter\n\n{cover_letter}",
+                    },
                 ]
 
                 # Save conversation history indexed by job ID
@@ -2227,13 +2233,13 @@ with gr.Blocks(title="Job Search Manager") as demo:
                     return history, history
 
                 # Add user message to history
-                history.append((message, None))
+                history.append({"role": "user", "content": message})
 
                 # Get AI response
                 response, artifact = resume_chat(message, history)
 
                 # Add AI response to history
-                history[-1] = (message, response)
+                history[-1] = {"role": "assistant", "content": response}
 
                 return history, history
 
