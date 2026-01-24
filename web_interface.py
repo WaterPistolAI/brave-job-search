@@ -10,6 +10,7 @@ import os
 import pandas as pd
 import sys
 import threading
+import queue
 from dotenv import load_dotenv
 from job_processor import JobEmbedder, process_jobs_from_json
 import logging
@@ -481,50 +482,79 @@ def run_job_search():
 
         search_cancelled = False
 
-    try:
-        # Capture stdout to display in the UI
-        import io
-        from contextlib import redirect_stdout, redirect_stderr
+    # Create a thread-safe queue for output
+    output_queue = queue.Queue()
 
-        output_buffer = io.StringIO()
+    def search_worker():
+        """Worker function that runs the job search."""
+        try:
+            # Capture stdout to display in the UI
+            import io
+            from contextlib import redirect_stdout, redirect_stderr
 
-        # Reload environment variables to get latest configuration
-        from dotenv import load_dotenv
+            output_buffer = io.StringIO()
 
-        load_dotenv(override=True)
+            # Reload environment variables to get latest configuration
+            from dotenv import load_dotenv
 
-        # Check which search providers to use
-        search_providers_str = os.environ.get("SEARCH_PROVIDERS", "brave")
-        search_providers = [
-            p.strip() for p in search_providers_str.split(",") if p.strip()
-        ]
+            load_dotenv(override=True)
 
-        with redirect_stdout(output_buffer), redirect_stderr(output_buffer):
-            if len(search_providers) > 1:
-                # Use multi-search for multiple providers
-                import multi_search
+            # Check which search providers to use
+            search_providers_str = os.environ.get("SEARCH_PROVIDERS", "brave")
+            search_providers = [
+                p.strip() for p in search_providers_str.split(",") if p.strip()
+            ]
 
-                multi_search.run_multi_search(providers=search_providers)
-            elif "google" in search_providers:
-                import google_search
+            with redirect_stdout(output_buffer), redirect_stderr(output_buffer):
+                if len(search_providers) > 1:
+                    # Use multi-search for multiple providers
+                    import multi_search
 
-                google_search.main()
-            else:
-                # Reload brave_job_search module to get latest environment variables
-                import importlib
+                    multi_search.run_multi_search(providers=search_providers)
+                elif "google" in search_providers:
+                    import google_search
 
-                importlib.reload(brave_job_search)
-                brave_job_search.main()
+                    google_search.main()
+                else:
+                    # Reload brave_job_search module to get latest environment variables
+                    import importlib
 
-        output = output_buffer.getvalue()
-        if output:
+                    importlib.reload(brave_job_search)
+                    brave_job_search.main()
+
+            output = output_buffer.getvalue()
+            if output:
+                output_queue.put(output)
+            output_queue.put(
+                f"\n✅ Job search completed successfully using {', '.join(search_providers).upper()}!"
+            )
+        except Exception as e:
+            output_queue.put(f"❌ Error running job search: {str(e)}")
+        finally:
+            output_queue.put(None)  # Signal completion
+
+    # Start the worker thread
+    with search_lock:
+        search_thread = threading.Thread(target=search_worker)
+        search_thread.start()
+
+    # Yield output as it becomes available
+    while True:
+        try:
+            output = output_queue.get(timeout=0.1)
+            if output is None:
+                break
             yield output
-        yield f"\n✅ Job search completed successfully using {', '.join(search_providers).upper()}!"
-    except Exception as e:
-        yield f"❌ Error running job search: {str(e)}"
-    finally:
-        with search_lock:
-            search_thread = None
+        except queue.Empty:
+            # Check if cancelled
+            with search_lock:
+                if search_cancelled:
+                    yield "\n⏸️ Job search was cancelled by user."
+                    break
+            continue
+
+    with search_lock:
+        search_thread = None
 
 
 def cancel_job_search():
@@ -550,25 +580,52 @@ def run_job_processor():
 
         processor_cancelled = False
 
-    try:
-        # Capture stdout to display in the UI
-        import io
-        from contextlib import redirect_stdout, redirect_stderr
+    # Create a thread-safe queue for output
+    output_queue = queue.Queue()
 
-        output_buffer = io.StringIO()
+    def processor_worker():
+        """Worker function that runs the job processor."""
+        try:
+            # Capture stdout to display in the UI
+            import io
+            from contextlib import redirect_stdout, redirect_stderr
 
-        with redirect_stdout(output_buffer), redirect_stderr(output_buffer):
-            process_jobs_from_json()
+            output_buffer = io.StringIO()
 
-        output = output_buffer.getvalue()
-        if output:
+            with redirect_stdout(output_buffer), redirect_stderr(output_buffer):
+                process_jobs_from_json()
+
+            output = output_buffer.getvalue()
+            if output:
+                output_queue.put(output)
+            output_queue.put("\n✅ Job processing completed successfully!")
+        except Exception as e:
+            output_queue.put(f"❌ Error running job processor: {str(e)}")
+        finally:
+            output_queue.put(None)  # Signal completion
+
+    # Start the worker thread
+    with processor_lock:
+        processor_thread = threading.Thread(target=processor_worker)
+        processor_thread.start()
+
+    # Yield output as it becomes available
+    while True:
+        try:
+            output = output_queue.get(timeout=0.1)
+            if output is None:
+                break
             yield output
-        yield "\n✅ Job processing completed successfully!"
-    except Exception as e:
-        yield f"❌ Error running job processor: {str(e)}"
-    finally:
-        with processor_lock:
-            processor_thread = None
+        except queue.Empty:
+            # Check if cancelled
+            with processor_lock:
+                if processor_cancelled:
+                    yield "\n⏸️ Job processor was cancelled by user."
+                    break
+            continue
+
+    with processor_lock:
+        processor_thread = None
 
 
 def cancel_job_processor():
