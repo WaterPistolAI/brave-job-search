@@ -1281,6 +1281,12 @@ def resume_chat(message, history):
                     "role": "system",
                     "content": """You are an expert career coach and resume writer. Your goal is to help the user represent themselves authentically and effectively, not to take over their voice.
 
+## IMPORTANT: Response Format
+- Always respond in **Markdown format** for better readability
+- Use proper Markdown syntax: **bold**, *italic*, `code`, bullet points, numbered lists, headers (#, ##, ###)
+- When generating cover letters, format them as clean Markdown with proper spacing
+- Use code blocks (```) for examples or templates
+
 ## Resume Best Practices & Tips:
 
 ### Structure & Format:
@@ -2009,10 +2015,15 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 )
 
             # Event handlers
+            def embed_resume_and_start_chat(file):
+                """Embed resume and return status to trigger chat start."""
+                status, preview = embed_user_document("resume", file)
+                return status, preview, "Start chat"  # Signal to start chat
+
             embed_resume_btn.click(
-                lambda file: embed_user_document("resume", file),
+                embed_resume_and_start_chat,
                 inputs=[resume_upload],
-                outputs=[resume_status, resume_preview],
+                outputs=[resume_status, resume_preview, gr.State()],
             )
 
             embed_cover_letter_btn.click(
