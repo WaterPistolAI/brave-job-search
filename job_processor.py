@@ -123,30 +123,70 @@ class JobDatabase:
         logging.info("Database initialized successfully")
 
     def insert_job(self, job_data: Dict) -> int:
-        """Insert a new job into the database."""
+        """Insert a new job into the database or update if URL already exists."""
         cursor = self.conn.cursor()
         try:
+            # Check if job with this URL already exists
             cursor.execute(
-                """
-                INSERT OR IGNORE INTO jobs (url, title, snippet, source_adapter)
-                VALUES (?, ?, ?, ?)
-            """,
-                (
-                    job_data["url"],
-                    job_data["title"],
-                    job_data["snippet"],
-                    job_data.get("source_adapter", "unknown"),
-                ),
+                "SELECT id, status FROM jobs WHERE url = ?", (job_data["url"],)
             )
-            self.conn.commit()
-            job_id = cursor.lastrowid
-            if job_id:
-                logging.info(
-                    f"Inserted job: {job_data['title']} from {job_data.get('source_adapter', 'unknown')} (ID: {job_id})"
+            existing_job = cursor.fetchone()
+
+            if existing_job:
+                # Job exists, update it
+                job_id = existing_job[0]
+                current_status = existing_job[1]
+
+                # Only update if status is not already 'embedded' (don't re-process completed jobs)
+                if current_status != "embedded":
+                    cursor.execute(
+                        """
+                        UPDATE jobs 
+                        SET title = ?, 
+                            snippet = ?, 
+                            source_adapter = ?,
+                            status = 'pending',
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """,
+                        (
+                            job_data["title"],
+                            job_data["snippet"],
+                            job_data.get("source_adapter", "unknown"),
+                            job_id,
+                        ),
+                    )
+                    self.conn.commit()
+                    logging.info(
+                        f"Updated existing job: {job_data['title']} from {job_data.get('source_adapter', 'unknown')} (ID: {job_id})"
+                    )
+                else:
+                    logging.info(
+                        f"Job already processed (embedded): {job_data['title']} (ID: {job_id})"
+                    )
+                return job_id
+            else:
+                # Insert new job
+                cursor.execute(
+                    """
+                    INSERT INTO jobs (url, title, snippet, source_adapter)
+                    VALUES (?, ?, ?, ?)
+                """,
+                    (
+                        job_data["url"],
+                        job_data["title"],
+                        job_data["snippet"],
+                        job_data.get("source_adapter", "unknown"),
+                    ),
                 )
-            return job_id
+                self.conn.commit()
+                job_id = cursor.lastrowid
+                logging.info(
+                    f"Inserted new job: {job_data['title']} from {job_data.get('source_adapter', 'unknown')} (ID: {job_id})"
+                )
+                return job_id
         except sqlite3.Error as e:
-            logging.error(f"Error inserting job: {e}")
+            logging.error(f"Error inserting/updating job: {e}")
             return None
 
     def update_job_status(self, job_id: int, status: str, message: str = None):
@@ -339,6 +379,9 @@ def verify_job_with_rate_limit(
         # Check for domain-specific CSS selectors first
         domain_config = get_domain_config(domain)
         if domain_config and "expired_selectors" in domain_config:
+            logging.info(
+                f"Checking {len(domain_config['expired_selectors'])} expired selectors for {domain}"
+            )
             for selector_config in domain_config["expired_selectors"]:
                 selector = selector_config["selector"]
                 case_sensitive = selector_config.get("case_sensitive", False)
@@ -348,6 +391,9 @@ def verify_job_with_rate_limit(
                     element = soup.select_one(selector)
                     if element:
                         element_text = element.get_text()
+                        logging.debug(
+                            f"Found element with selector '{selector}': {element_text[:100]}"
+                        )
                         if not case_sensitive:
                             element_text = element_text.lower()
 
@@ -359,6 +405,9 @@ def verify_job_with_rate_limit(
                                 text_pattern = text_pattern.lower()
 
                             if text_pattern in element_text:
+                                logging.info(
+                                    f"Job expired via pattern match: '{text_pattern}' in '{selector}'"
+                                )
                                 return (
                                     False,
                                     f"Job appears closed: Pattern '{text_pattern}' found in element '{selector}'",
@@ -371,6 +420,9 @@ def verify_job_with_rate_limit(
                                 expected_text = expected_text.lower()
 
                             if expected_text in element_text:
+                                logging.info(
+                                    f"Job expired via exact match: '{expected_text}' in '{selector}'"
+                                )
                                 return (
                                     False,
                                     f"Job appears closed: '{expected_text}' found in element '{selector}'",
@@ -398,6 +450,10 @@ def verify_job_with_rate_limit(
                 "this job is no longer available",
                 "this posting has expired",
                 "this position is no longer open",
+                "oops! this job has expired",
+                "job has expired",
+                "this job has expired",
+                "expired",
             ]
 
         # Check for closed indicators in page text

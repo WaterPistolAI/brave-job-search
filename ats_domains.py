@@ -100,7 +100,17 @@ SUPPORTED_ATS_DOMAINS = {
         "scraping_adapter": "LevelsFYIAdapter",
         "expired_selectors": [
             {
-                "selector": "section.job-details-module-scss-module__wKuTxW__errorContainer h1",
+                "selector": "section[class*='errorContainer'] h1",
+                "text": "Oops! This job has expired",
+                "case_sensitive": False,
+            },
+            {
+                "selector": "h1",
+                "text": "Oops! This job has expired",
+                "case_sensitive": False,
+            },
+            {
+                "selector": "div[class*='error'] h1",
                 "text": "Oops! This job has expired",
                 "case_sensitive": False,
             },

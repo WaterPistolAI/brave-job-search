@@ -259,6 +259,13 @@ def get_jobs_filtered(status_filter="all", search_query=""):
     conn.close()
 
     df = pd.DataFrame([dict(job) for job in jobs])
+
+    # Convert URL column to clickable links
+    if "url" in df.columns:
+        df["url"] = df["url"].apply(
+            lambda x: f'<a href="{x}" target="_blank">View Job</a>'
+        )
+
     return df
 
 
@@ -285,12 +292,15 @@ def get_job_details(job_id):
     job_dict = dict(job)
     logs_df = pd.DataFrame([dict(log) for log in logs])
 
+    # Create clickable link for URL
+    url_link = f"[{job_dict['url']}]({job_dict['url']})"
+
     details = f"""
     **Title:** {job_dict['title']}
     **Company:** {job_dict['company'] or 'N/A'}
     **Location:** {job_dict['location'] or 'N/A'}
     **Status:** {job_dict['status']}
-    **URL:** {job_dict['url']}
+    **URL:** {url_link}
     **Created:** {job_dict['created_at']}
     
     **Job Description:**
