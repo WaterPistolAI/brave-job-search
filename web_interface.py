@@ -107,6 +107,7 @@ def load_env_config():
         "GOOGLE_SEARCH_ID": os.environ.get("GOOGLE_SEARCH_ID", ""),
         "GOOGLE_SEARCH_RATE_LIMIT": os.environ.get("GOOGLE_SEARCH_RATE_LIMIT", "1.1"),
         "SEARCH_PROVIDER": os.environ.get("SEARCH_PROVIDER", "brave"),
+        "SEARCH_PROVIDERS": os.environ.get("SEARCH_PROVIDERS", "brave"),
     }
     return config
 
@@ -133,6 +134,7 @@ def save_env_config(config):
             "GOOGLE_SEARCH_ID": config["GOOGLE_SEARCH_ID"],
             "GOOGLE_SEARCH_RATE_LIMIT": config["GOOGLE_SEARCH_RATE_LIMIT"],
             "SEARCH_PROVIDER": config["SEARCH_PROVIDER"],
+            "SEARCH_PROVIDERS": config.get("SEARCH_PROVIDERS", "brave"),
         }
 
         # Keep existing lines that aren't being updated
@@ -458,11 +460,19 @@ def run_job_search():
 
         output_buffer = io.StringIO()
 
-        # Check which search provider to use
-        search_provider = os.environ.get("SEARCH_PROVIDER", "brave").lower()
+        # Check which search providers to use
+        search_providers_str = os.environ.get("SEARCH_PROVIDERS", "brave")
+        search_providers = [
+            p.strip() for p in search_providers_str.split(",") if p.strip()
+        ]
 
         with redirect_stdout(output_buffer), redirect_stderr(output_buffer):
-            if search_provider == "google":
+            if len(search_providers) > 1:
+                # Use multi-search for multiple providers
+                import multi_search
+
+                multi_search.run_multi_search(providers=search_providers)
+            elif "google" in search_providers:
                 import google_search
 
                 google_search.main()
@@ -472,7 +482,7 @@ def run_job_search():
         output = output_buffer.getvalue()
         if output:
             yield output
-        yield f"\n✅ Job search completed successfully using {search_provider.upper()}!"
+        yield f"\n✅ Job search completed successfully using {', '.join(search_providers).upper()}!"
     except Exception as e:
         yield f"❌ Error running job search: {str(e)}"
 
@@ -667,11 +677,18 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 gr.Markdown("### Search Provider")
 
             with gr.Row():
-                search_provider = gr.Radio(
-                    choices=["brave", "google"],
-                    value="brave",
-                    label="Search Provider",
-                    info="Choose between Brave Search API and Google Custom Search API",
+                gr.Markdown(
+                    "Select the search providers you want to use. Multiple providers can be selected simultaneously."
+                )
+
+            with gr.Row():
+                search_provider_brave = gr.Checkbox(
+                    label="Brave Search", value=True, info="Use Brave Search API"
+                )
+                search_provider_google = gr.Checkbox(
+                    label="Google Search",
+                    value=False,
+                    info="Use Google Custom Search API",
                 )
 
             with gr.Row():
@@ -722,7 +739,8 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 config_status = gr.Textbox(label="Status", interactive=False)
 
             def update_all_config(
-                search_provider,
+                search_provider_brave,
+                search_provider_google,
                 brave_rate_limit,
                 monthly_limit,
                 freshness,
@@ -734,7 +752,17 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 """Update all configuration settings."""
                 config = load_env_config()
 
-                config["SEARCH_PROVIDER"] = search_provider
+                # Determine search provider(s)
+                providers = []
+                if search_provider_brave:
+                    providers.append("brave")
+                if search_provider_google:
+                    providers.append("google")
+
+                # Set SEARCH_PROVIDER (use first provider for backward compatibility)
+                config["SEARCH_PROVIDER"] = providers[0] if providers else "brave"
+                config["SEARCH_PROVIDERS"] = ",".join(providers)
+
                 config["BRAVE_RATE_LIMIT"] = str(brave_rate_limit)
                 config["BRAVE_MONTHLY_LIMIT"] = str(monthly_limit)
                 config["BRAVE_FRESHNESS"] = freshness
@@ -745,14 +773,15 @@ with gr.Blocks(title="Job Search Manager") as demo:
 
                 if save_env_config(config):
                     logging.info("Configuration updated")
-                    return "Success: Configuration updated"
+                    return f"Success: Configuration updated (Providers: {', '.join(providers)})"
                 else:
                     return "Error: Failed to save configuration"
 
             update_config_btn.click(
                 update_all_config,
                 inputs=[
-                    search_provider,
+                    search_provider_brave,
+                    search_provider_google,
                     brave_rate_limit,
                     monthly_limit,
                     freshness,
