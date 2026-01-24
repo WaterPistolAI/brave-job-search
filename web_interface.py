@@ -698,8 +698,19 @@ def embed_user_document(document_type, file_path):
             name=collection_name, metadata={"hnsw:space": "cosine"}
         )
 
-        # Generate a unique ID for the document
-        doc_id = f"{document_type}_{int(time.time())}"
+        # Use a consistent ID for each document type (resume or cover_letter)
+        doc_id = f"{document_type}_current"
+
+        # Check if a document of this type already exists and delete it
+        try:
+            existing_docs = collection.get(ids=[doc_id])
+            if existing_docs and existing_docs["ids"]:
+                collection.delete(ids=[doc_id])
+                logging.info(f"Deleted previous {document_type} document")
+        except Exception as e:
+            logging.warning(
+                f"Error checking for existing {document_type} document: {e}"
+            )
 
         # Store in ChromaDB
         collection.add(
