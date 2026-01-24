@@ -1149,7 +1149,7 @@ CANDIDATE'S CURRENT COVER LETTER:
 Please provide your response in the following format:
 
 === PERSONALIZED COVER LETTER ===
-[Write a compelling, personalized cover letter that highlights the candidate's relevant experience, skills, and achievements. Make it specific to this job and company. Use a professional tone and format.]
+[Write a compelling, personalized cover letter that highlights the candidate's relevant experience, skills, and achievements. Make it specific to this job and company. Format it in MARKDOWN with proper headers, bold text, and emphasis where appropriate. Maintain the user's voice and character but use a professional tone and format.]
 
 === PROS AND CONS ANALYSIS ===
 
@@ -1179,7 +1179,7 @@ Please provide your response in the following format:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert career coach and professional writer with deep knowledge of job applications, resume writing, and cover letter crafting.",
+                        "content": "You are an expert career coach and professional writer with deep knowledge of job applications, resume writing, and cover letter crafting. You must always format the cover letter in Markdown when generating it.",
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -2209,11 +2209,11 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 if not cover_letter or not analysis:
                     return status, None, None, None, ""
 
-                # Create chat history with analysis only (no cover letter markdown)
+                # Create chat history with analysis only (no markdown headers in chat)
                 chat_history = [
                     {
                         "role": "assistant",
-                        "content": f"## 📋 Analysis for Job #{job_id}\n\n{job_dict['title']} at {job_dict['company']}\n\n{analysis}",
+                        "content": f"Analysis for Job #{job_id}\n\n{job_dict['title']} at {job_dict['company']}\n\n{analysis}",
                     },
                     {
                         "role": "assistant",
@@ -2289,7 +2289,7 @@ with gr.Blocks(title="Job Search Manager") as demo:
 
             with gr.Row():
                 with gr.Column(scale=2):
-                    gr.Markdown("<center><h2>💬 Chat with AI Coach</h2></center>")
+                    gr.Markdown("<center><h2>💬 Chat Interface</h2></center>")
 
                     # Chat history display
                     chat_history = gr.Chatbot(
@@ -2343,8 +2343,11 @@ with gr.Blocks(title="Job Search Manager") as demo:
                             placeholder="Request context will appear here...",
                         )
 
-                    cover_letter_artifact = gr.Markdown(
+                    cover_letter_artifact = gr.Code(
                         label="Generated Cover Letter",
+                        language="markdown",
+                        interactive=False,
+                        lines=30,
                         value="Cover letters generated in the chat will appear here...",
                     )
 
@@ -2475,22 +2478,15 @@ with gr.Blocks(title="Job Search Manager") as demo:
                     markdown_content,
                 )
 
-            def on_chat_response(response, artifact_dict):
-                """Handle chat response and update artifact display."""
-                if artifact_dict:
-                    return update_artifact_display(artifact_dict)
+            # Navigation handlers
+            def navigate_artifacts_handler(direction):
+                artifact, counter = navigate_artifacts(direction)
+                if artifact:
+                    return update_artifact_display(artifact)
                 return "No artifacts", "", "", ""
 
-            # Navigation handlers
             prev_btn.click(
-                lambda: navigate_artifacts("prev"),
-                outputs=[cover_letter_artifact, artifact_counter],
-            ).then(
-                lambda: get_current_artifact(),
-                outputs=[cover_letter_artifact, artifact_counter],
-            ).then(
-                lambda artifact: update_artifact_display(artifact),
-                inputs=[cover_letter_artifact],
+                lambda: navigate_artifacts_handler("prev"),
                 outputs=[
                     artifact_counter,
                     artifact_id_display,
@@ -2500,14 +2496,7 @@ with gr.Blocks(title="Job Search Manager") as demo:
             )
 
             next_btn.click(
-                lambda: navigate_artifacts("next"),
-                outputs=[cover_letter_artifact, artifact_counter],
-            ).then(
-                lambda: get_current_artifact(),
-                outputs=[cover_letter_artifact, artifact_counter],
-            ).then(
-                lambda artifact: update_artifact_display(artifact),
-                inputs=[cover_letter_artifact],
+                lambda: navigate_artifacts_handler("next"),
                 outputs=[
                     artifact_counter,
                     artifact_id_display,
