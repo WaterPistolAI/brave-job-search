@@ -2094,7 +2094,7 @@ with gr.Blocks(title="Job Search Manager") as demo:
             with gr.Row():
                 gr.Markdown(
                     "Select a job from the ranked matches to generate a personalized cover letter and analysis. "
-                    "The pros/cons analysis and cover letter will appear as messages in the chat window."
+                    "The cover letter will appear as a code artifact in the right panel."
                 )
 
             gr.Markdown("---")
@@ -2143,7 +2143,7 @@ with gr.Blocks(title="Job Search Manager") as demo:
                             "📝 Generate Cover Letter & Analysis", variant="primary"
                         )
 
-                with gr.Column(scale=2):
+                with gr.Column(scale=1):
                     gr.Markdown("<center><h2>💬 Chat with AI Coach</h2></center>")
 
                     # Chat history display
@@ -2164,6 +2164,18 @@ with gr.Blocks(title="Job Search Manager") as demo:
 
                     # Hidden state for chat history
                     job_chat_state = gr.State([])
+
+                with gr.Column(scale=1):
+                    gr.Markdown("<center><h2>📄 Cover Letter Artifact</h2></center>")
+
+                    # Code artifact display for cover letter
+                    cover_letter_code = gr.Code(
+                        label="Generated Cover Letter",
+                        language="markdown",
+                        interactive=False,
+                        lines=30,
+                        value="Cover letter will appear here after generation...",
+                    )
 
             gr.Markdown("---")
 
@@ -2187,7 +2199,7 @@ with gr.Blocks(title="Job Search Manager") as demo:
             def generate_cover_letter_for_chat(job_id):
                 """Generate cover letter and add to chat history."""
                 if not job_id:
-                    return "Error: Please enter a job ID", None, None, None
+                    return "Error: Please enter a job ID", None, None, None, ""
 
                 # Generate cover letter and analysis
                 status, cover_letter, analysis, job_dict = generate_cover_letter_and_analyze(
@@ -2195,14 +2207,10 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 )
 
                 if not cover_letter or not analysis:
-                    return status, None, None, None
+                    return status, None, None, None, ""
 
-                # Create chat history with cover letter first (in RST/Markdown format), then analysis, then follow-up question
+                # Create chat history with analysis only (no cover letter markdown)
                 chat_history = [
-                    {
-                        "role": "assistant",
-                        "content": f"## 📄 Personalized Cover Letter\n\n{cover_letter}",
-                    },
                     {
                         "role": "assistant",
                         "content": f"## 📋 Analysis for Job #{job_id}\n\n{job_dict['title']} at {job_dict['company']}\n\n{analysis}",
@@ -2217,7 +2225,7 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 conversation_history_storage["current_resume_id"] = job_id
                 conversation_history_storage["histories"][job_id] = chat_history
 
-                return status, chat_history, chat_history, job_dict
+                return status, chat_history, chat_history, job_dict, cover_letter
 
             match_jobs_btn.click(
                 analyze_resume_and_rank_jobs,
@@ -2233,6 +2241,7 @@ with gr.Blocks(title="Job Search Manager") as demo:
                     job_chat_history,
                     job_chat_state,
                     gr.State(),  # job_dict placeholder
+                    cover_letter_code,  # Pass cover letter to code artifact
                 ],
             )
 
