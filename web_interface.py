@@ -501,7 +501,7 @@ def run_job_processor():
 initialize_database()
 
 # Create Gradio interface
-with gr.Blocks(title="Job Search Manager", theme=gr.themes.Soft()) as demo:
+with gr.Blocks(title="Job Search Manager") as demo:
     gr.Markdown("# 🔍 Job Search Manager")
     gr.Markdown(
         "Manage and monitor your job search system with provider management, database access, and semantic search."
@@ -870,4 +870,6 @@ with gr.Blocks(title="Job Search Manager", theme=gr.themes.Soft()) as demo:
 
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
+    demo.launch(
+        server_name="0.0.0.0", server_port=7860, share=False, theme=gr.themes.Soft()
+    )
