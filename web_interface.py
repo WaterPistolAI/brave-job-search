@@ -645,33 +645,24 @@ def cancel_job_processor():
 
 
 def extract_text_from_file(file_path):
-    """Extract text from a file (txt, rst, or pdf)."""
+    """Extract text from a file using Docling (supports PDF, DOCX, HTML, PPTX, images, etc.)."""
     file_path = Path(file_path)
-    file_ext = file_path.suffix.lower()
 
     try:
-        if file_ext == ".txt":
-            with open(file_path, "r", encoding="utf-8") as f:
-                return f.read()
-        elif file_ext == ".rst":
-            with open(file_path, "r", encoding="utf-8") as f:
-                return f.read()
-        elif file_ext == ".pdf":
-            try:
-                import PyPDF2
+        from docling.document_converter import DocumentConverter
 
-                with open(file_path, "rb") as f:
-                    reader = PyPDF2.PdfReader(f)
-                    text = ""
-                    for page in reader.pages:
-                        text += page.extract_text() + "\n"
-                    return text
-            except ImportError:
-                logging.error("PyPDF2 not installed. Install with: pip install PyPDF2")
-                return None
-        else:
-            logging.error(f"Unsupported file format: {file_ext}")
-            return None
+        # Use Docling to convert the document
+        converter = DocumentConverter()
+        result = converter.convert(str(file_path))
+
+        # Export to markdown
+        markdown_text = result.document.export_to_markdown()
+
+        logging.info(f"Successfully extracted text from {file_path.name} using Docling")
+        return markdown_text
+    except ImportError:
+        logging.error("Docling not installed. Install with: pip install docling")
+        return None
     except Exception as e:
         logging.error(f"Error extracting text from {file_path}: {e}")
         return None
@@ -1104,7 +1095,7 @@ with gr.Blocks(title="Job Search Manager") as demo:
             with gr.Row():
                 gr.Markdown(
                     "Upload your resume and cover letter to enable semantic search against your qualifications. "
-                    "Supported formats: **.txt**, **.rst**, **.pdf**"
+                    "Supported formats: **PDF, DOCX, HTML, PPTX, images, and more** (powered by Docling)"
                 )
 
             gr.Markdown("---")
@@ -1115,7 +1106,18 @@ with gr.Blocks(title="Job Search Manager") as demo:
             with gr.Row():
                 resume_upload = gr.File(
                     label="Upload Resume",
-                    file_types=[".txt", ".rst", ".pdf"],
+                    file_types=[
+                        ".pdf",
+                        ".docx",
+                        ".doc",
+                        ".html",
+                        ".pptx",
+                        ".txt",
+                        ".rst",
+                        ".png",
+                        ".jpg",
+                        ".jpeg",
+                    ],
                     file_count="single",
                 )
                 embed_resume_btn = gr.Button("Embed Resume", variant="primary")
@@ -1136,7 +1138,18 @@ with gr.Blocks(title="Job Search Manager") as demo:
             with gr.Row():
                 cover_letter_upload = gr.File(
                     label="Upload Cover Letter",
-                    file_types=[".txt", ".rst", ".pdf"],
+                    file_types=[
+                        ".pdf",
+                        ".docx",
+                        ".doc",
+                        ".html",
+                        ".pptx",
+                        ".txt",
+                        ".rst",
+                        ".png",
+                        ".jpg",
+                        ".jpeg",
+                    ],
                     file_count="single",
                 )
                 embed_cover_letter_btn = gr.Button("Embed Cover Letter", variant="primary")
@@ -1181,11 +1194,12 @@ with gr.Blocks(title="Job Search Manager") as demo:
             with gr.Row():
                 gr.Markdown(
                     """
-                - **Resume**: Upload your resume in .txt, .rst, or .pdf format
-                - **Cover Letter**: Upload your cover letter in .txt, .rst, or .pdf format
+                - **Resume**: Upload your resume in PDF, DOCX, DOC, HTML, PPTX, TXT, RST, or image format
+                - **Cover Letter**: Upload your cover letter in PDF, DOCX, DOC, HTML, PPTX, TXT, RST, or image format
                 - **Embed**: Click the embed button to process and store your document in the vector database
                 - **Search**: Use semantic search to find relevant sections in your documents
                 - Documents are stored separately from job listings for easy reference
+                - Powered by Docling for accurate text extraction from multiple formats
                 """
                 )
 
