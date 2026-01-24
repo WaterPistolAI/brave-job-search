@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from scraping_adapters import adapter_registry
 from embedding_adapters import get_embedding_adapter
 from ats_domains import get_expired_indicators, get_domain_config
-from multiprocessing.pool import ThreadPool as Pool
+from pathos.multiprocessing import ProcessingPool as Pool
 from urllib.parse import urlparse
 import json
 from ratelimit import limits, sleep_and_retry
