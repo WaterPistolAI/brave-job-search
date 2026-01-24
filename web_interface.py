@@ -9,6 +9,7 @@ import json
 import os
 import pandas as pd
 import sys
+import threading
 from dotenv import load_dotenv
 from job_processor import JobEmbedder, process_jobs_from_json
 import logging
@@ -29,6 +30,14 @@ logging.basicConfig(
     filemode="a",
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
+
+# Global variables for thread management
+search_thread = None
+processor_thread = None
+search_cancelled = False
+processor_cancelled = False
+search_lock = threading.Lock()
+processor_lock = threading.Lock()
 
 
 def initialize_database():
@@ -463,6 +472,15 @@ def export_jobs():
 
 def run_job_search():
     """Run the job search function directly."""
+    global search_thread, search_cancelled
+
+    with search_lock:
+        if search_thread and search_thread.is_alive():
+            yield "❌ Job search is already running. Please wait or cancel the current operation."
+            return
+
+        search_cancelled = False
+
     try:
         # Capture stdout to display in the UI
         import io
@@ -504,10 +522,34 @@ def run_job_search():
         yield f"\n✅ Job search completed successfully using {', '.join(search_providers).upper()}!"
     except Exception as e:
         yield f"❌ Error running job search: {str(e)}"
+    finally:
+        with search_lock:
+            search_thread = None
+
+
+def cancel_job_search():
+    """Cancel the running job search."""
+    global search_cancelled
+
+    with search_lock:
+        if search_thread and search_thread.is_alive():
+            search_cancelled = True
+            return "⏸️ Job search cancellation requested..."
+        else:
+            return "ℹ️ No job search is currently running."
 
 
 def run_job_processor():
     """Run the job processor function directly."""
+    global processor_thread, processor_cancelled
+
+    with processor_lock:
+        if processor_thread and processor_thread.is_alive():
+            yield "❌ Job processor is already running. Please wait or cancel the current operation."
+            return
+
+        processor_cancelled = False
+
     try:
         # Capture stdout to display in the UI
         import io
@@ -524,6 +566,21 @@ def run_job_processor():
         yield "\n✅ Job processing completed successfully!"
     except Exception as e:
         yield f"❌ Error running job processor: {str(e)}"
+    finally:
+        with processor_lock:
+            processor_thread = None
+
+
+def cancel_job_processor():
+    """Cancel the running job processor."""
+    global processor_cancelled
+
+    with processor_lock:
+        if processor_thread and processor_thread.is_alive():
+            processor_cancelled = True
+            return "⏸️ Job processor cancellation requested..."
+        else:
+            return "ℹ️ No job processor is currently running."
 
 
 # Initialize database on module import
@@ -869,6 +926,9 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 search_btn = gr.Button(
                     "🔍 Run Job Search", variant="primary", size="lg"
                 )
+                search_cancel_btn = gr.Button(
+                    "⏹️ Stop Search", variant="stop", size="lg"
+                )
 
             with gr.Row():
                 search_output = gr.Textbox(
@@ -886,6 +946,9 @@ with gr.Blocks(title="Job Search Manager") as demo:
             with gr.Row():
                 process_btn = gr.Button(
                     "⚙️ Run Job Processor", variant="primary", size="lg"
+                )
+                process_cancel_btn = gr.Button(
+                    "⏹️ Stop Processor", variant="stop", size="lg"
                 )
 
             with gr.Row():
@@ -913,8 +976,10 @@ with gr.Blocks(title="Job Search Manager") as demo:
 
             # Event handlers
             search_btn.click(run_job_search, outputs=search_output)
+            search_cancel_btn.click(cancel_job_search, outputs=search_output)
 
             process_btn.click(run_job_processor, outputs=process_output)
+            process_cancel_btn.click(cancel_job_processor, outputs=process_output)
 
 
 if __name__ == "__main__":
