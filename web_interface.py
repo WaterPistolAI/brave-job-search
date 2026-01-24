@@ -992,6 +992,427 @@ Make the queries specific and targeted, focusing on the candidate's unique combi
         return f"Error: {str(e)}", None
 
 
+def export_cover_letter_to_pdf(cover_letter_text, job_title, company):
+    """Export cover letter to PDF file."""
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.units import inch
+
+        # Create PDF file
+        pdf_path = f"cover_letter_{company}_{job_title.replace(' ', '_')}.pdf"
+        doc = SimpleDocTemplate(pdf_path, pagesize=letter)
+
+        # Create styles
+        styles = getSampleStyleSheet()
+        styles.add(
+            ParagraphStyle(
+                name="Custom",
+                parent=styles["Normal"],
+                fontName="Helvetica",
+                fontSize=11,
+                leading=14,
+                spaceAfter=12,
+            )
+        )
+
+        # Build content
+        story = []
+        lines = cover_letter_text.split("\n")
+        for line in lines:
+            if line.strip():
+                story.append(Paragraph(line, styles["Custom"]))
+                story.append(Spacer(1, 0.1 * inch))
+
+        # Build PDF
+        doc.build(story)
+
+        logging.info(f"Successfully exported cover letter to {pdf_path}")
+        return f"✅ Successfully exported cover letter to {pdf_path}", pdf_path
+    except ImportError:
+        return (
+            "Error: reportlab not installed. Install with: pip install reportlab",
+            None,
+        )
+    except Exception as e:
+        logging.error(f"Error exporting to PDF: {e}")
+        return f"Error exporting to PDF: {str(e)}", None
+
+
+def generate_cover_letter_and_analyze(job_id):
+    """
+    Generate a personalized cover letter for a specific job and analyze
+    pros/cons of the candidate's materials compared to the job.
+    """
+    try:
+        # Get job details from database
+        conn = get_db_connection()
+        job = conn.execute(
+            """
+            SELECT id, title, company, location, job_description, requirements, benefits, salary, url
+            FROM jobs WHERE id = ?
+        """,
+            (job_id,),
+        ).fetchone()
+        conn.close()
+
+        if not job:
+            return "Error: Job not found", None, None
+
+        job_dict = dict(job)
+
+        # Get user documents (resume and cover letter)
+        embedder = JobEmbedder()
+        user_collection = embedder.client.get_collection(name="user_documents")
+        user_docs = user_collection.get()
+
+        if not user_docs or not user_docs["documents"]:
+            return (
+                "Error: No resume or cover letter found. Please upload your documents first.",
+                None,
+                None,
+            )
+
+        # Extract resume and cover letter text
+        resume_text = ""
+        cover_letter_text = ""
+        for i, metadata in enumerate(user_docs["metadatas"]):
+            doc_type = metadata.get("document_type", "")
+            if doc_type == "resume":
+                resume_text = user_docs["documents"][i]
+            elif doc_type == "cover_letter":
+                cover_letter_text = user_docs["documents"][i]
+
+        if not resume_text:
+            return (
+                "Error: No resume found. Please upload your resume first.",
+                None,
+                None,
+            )
+
+        # Use LLM to generate cover letter and analyze pros/cons
+        try:
+            from openai import OpenAI
+
+            # Check for OpenAI API key
+            openai_api_key = os.environ.get("OPENAI_API_KEY", "")
+            openai_base_url = os.environ.get("OPENAI_BASE_URL", "")
+            openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+            if not openai_api_key:
+                return (
+                    "Error: OpenAI API key not found. Please set OPENAI_API_KEY in your .env file.",
+                    None,
+                    None,
+                )
+
+            client = OpenAI(api_key=openai_api_key, base_url=openai_base_url)
+
+            # Create prompt for LLM
+            prompt = f"""You are an expert career coach and professional writer. Your task is to:
+
+1. Generate a personalized cover letter for the candidate based on the job description
+2. Analyze the pros and cons of the candidate's resume and current cover letter compared to this specific job
+
+JOB DETAILS:
+Title: {job_dict['title']}
+Company: {job_dict['company']}
+Location: {job_dict['location']}
+Salary: {job_dict['salary'] or 'Not specified'}
+
+JOB DESCRIPTION:
+{job_dict['job_description'][:4000] if job_dict['job_description'] else 'Not provided'}
+
+REQUIREMENTS:
+{job_dict['requirements'][:3000] if job_dict['requirements'] else 'Not provided'}
+
+BENEFITS:
+{job_dict['benefits'][:2000] if job_dict['benefits'] else 'Not provided'}
+
+CANDIDATE'S RESUME:
+{resume_text[:4000]}
+
+CANDIDATE'S CURRENT COVER LETTER:
+{cover_letter_text[:3000] if cover_letter_text else 'No cover letter provided'}
+
+Please provide your response in the following format:
+
+=== PERSONALIZED COVER LETTER ===
+[Write a compelling, personalized cover letter that highlights the candidate's relevant experience, skills, and achievements. Make it specific to this job and company. Use a professional tone and format.]
+
+=== PROS AND CONS ANALYSIS ===
+
+**STRENGTHS (Pros):**
+[List 5-7 specific strengths of the candidate's materials in relation to this job. Focus on:
+- Relevant skills and experience that match job requirements
+- Notable achievements that demonstrate capability
+- Strong qualifications that align with the role
+- Any unique value propositions the candidate offers]
+
+**WEAKNESSES (Cons):**
+[List 3-5 areas where the candidate's materials could be improved or where there are gaps compared to this job. Focus on:
+- Missing or underemphasized skills mentioned in the job
+- Experience gaps that could be addressed
+- Areas where the resume or cover letter could be more compelling
+- Specific recommendations for improvement]
+
+**OVERALL FIT:**
+[Provide a brief assessment of how well the candidate fits this role (e.g., Excellent fit, Good fit, Moderate fit, or Poor fit) with a 1-2 sentence explanation]
+
+**RECOMMENDATIONS:**
+[Provide 3-5 specific, actionable recommendations for improving the candidate's application for this job]"""
+
+            # Call LLM
+            response = client.chat.completions.create(
+                model=openai_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert career coach and professional writer with deep knowledge of job applications, resume writing, and cover letter crafting.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.8,
+                max_tokens=3000,
+            )
+
+            llm_response = response.choices[0].message.content
+
+            # Parse the response into sections
+            sections = {}
+            current_section = None
+            current_content = []
+
+            for line in llm_response.split("\n"):
+                if line.strip().startswith("==="):
+                    # Save previous section
+                    if current_section:
+                        sections[current_section] = "\n".join(current_content).strip()
+                    # Start new section
+                    current_section = line.strip().replace("=", "").strip()
+                    current_content = []
+                else:
+                    if current_section:
+                        current_content.append(line)
+
+            # Save last section
+            if current_section:
+                sections[current_section] = "\n".join(current_content).strip()
+
+            # Extract cover letter
+            cover_letter = sections.get("PERSONALIZED COVER LETTER", "")
+
+            # Extract analysis
+            analysis = llm_response.replace(
+                sections.get("PERSONALIZED COVER LETTER", ""), ""
+            ).strip()
+
+            logging.info(f"Generated cover letter and analysis for job {job_id}")
+
+            return (
+                f"✅ Successfully generated cover letter and analysis for {job_dict['title']} at {job_dict['company']}",
+                cover_letter,
+                analysis,
+            )
+
+        except Exception as e:
+            logging.error(f"Error calling LLM: {e}")
+            return f"Error generating cover letter: {str(e)}", None, None
+
+    except Exception as e:
+        logging.error(f"Error in cover letter generation: {e}")
+        return f"Error: {str(e)}", None, None
+
+
+# Global artifact storage
+artifact_storage = {
+    "artifacts": [],
+    "current_index": 0,
+}
+
+
+def resume_chat(message, history):
+    """
+    Chat interface for resume editing and cover letter generation.
+    Returns response and optionally a cover letter artifact with metadata.
+    """
+    try:
+        # Get user documents
+        embedder = JobEmbedder()
+        user_collection = embedder.client.get_collection(name="user_documents")
+        user_docs = user_collection.get()
+
+        if not user_docs or not user_docs["documents"]:
+            return "Please upload your resume first in the Documents tab.", None
+
+        # Extract resume and cover letter text
+        resume_text = ""
+        cover_letter_text = ""
+        for i, metadata in enumerate(user_docs["metadatas"]):
+            doc_type = metadata.get("document_type", "")
+            if doc_type == "resume":
+                resume_text = user_docs["documents"][i]
+            elif doc_type == "cover_letter":
+                cover_letter_text = user_docs["documents"][i]
+
+        if not resume_text:
+            return "No resume found. Please upload your resume first.", None
+
+        # Use LLM to process the request
+        try:
+            from openai import OpenAI
+
+            openai_api_key = os.environ.get("OPENAI_API_KEY", "")
+            openai_base_url = os.environ.get("OPENAI_BASE_URL", "")
+            openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+            if not openai_api_key:
+                return (
+                    "OpenAI API key not found. Please set OPENAI_API_KEY in your .env file.",
+                    None,
+                )
+
+            client = OpenAI(api_key=openai_api_key, base_url=openai_base_url)
+
+            # Build conversation history
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are an expert career coach and resume writer. Help the user improve their resume and generate cover letters.
+
+IMPORTANT: When the user engages in conversation about their resume or career goals, you should proactively ask about their strengths and weaknesses (pros and cons) to provide better, personalized advice. Ask questions like:
+- "What do you consider your biggest strengths?"
+- "What areas do you think you need to improve?"
+- "What are your key achievements?"
+- "What challenges have you faced?"
+
+When asked to generate a cover letter, provide it in a clear, professional format.""",
+                }
+            ]
+
+            # Add resume context
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"USER'S RESUME:\n{resume_text[:3000]}",
+                }
+            )
+
+            if cover_letter_text:
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": f"USER'S CURRENT COVER LETTER:\n{cover_letter_text[:2000]}",
+                    }
+                )
+
+            # Add conversation history
+            for user_msg, assistant_msg in history:
+                messages.append({"role": "user", "content": user_msg})
+                if assistant_msg:
+                    messages.append({"role": "assistant", "content": assistant_msg})
+
+            # Add current message
+            messages.append({"role": "user", "content": message})
+
+            # Call LLM
+            response = client.chat.completions.create(
+                model=openai_model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=2000,
+            )
+
+            response_text = response.choices[0].message.content
+
+            # Check if response contains a cover letter
+            cover_letter_artifact = None
+            if (
+                "cover letter" in message.lower()
+                or "cover letter" in response_text.lower()
+            ):
+                # Extract cover letter from response
+                lines = response_text.split("\n")
+                cover_letter_lines = []
+                in_cover_letter = False
+
+                for line in lines:
+                    if "cover letter" in line.lower() or line.strip().startswith(
+                        "Dear"
+                    ):
+                        in_cover_letter = True
+                    if in_cover_letter:
+                        cover_letter_lines.append(line)
+                    if in_cover_letter and line.strip().endswith("Sincerely,"):
+                        break
+
+                if cover_letter_lines:
+                    # Generate unique artifact ID
+                    artifact_id = f"CL-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+                    # Create artifact with metadata
+                    cover_letter_artifact = {
+                        "id": artifact_id,
+                        "content": "\n".join(cover_letter_lines),
+                        "timestamp": datetime.now().isoformat(),
+                        "context": (
+                            message[:100] + "..." if len(message) > 100 else message
+                        ),
+                    }
+
+                    # Store artifact
+                    artifact_storage["artifacts"].append(cover_letter_artifact)
+                    artifact_storage["current_index"] = (
+                        len(artifact_storage["artifacts"]) - 1
+                    )
+
+                    logging.info(
+                        f"Created artifact {artifact_id} with {len(cover_letter_lines)} lines"
+                    )
+
+            return response_text, cover_letter_artifact
+
+        except Exception as e:
+            logging.error(f"Error in resume chat: {e}")
+            return f"Error: {str(e)}", None
+
+    except Exception as e:
+        logging.error(f"Error in resume chat: {e}")
+        return f"Error: {str(e)}", None
+
+
+def navigate_artifacts(direction):
+    """Navigate through stored artifacts."""
+    if not artifact_storage["artifacts"]:
+        return None, "No artifacts available"
+
+    current = artifact_storage["current_index"]
+
+    if direction == "next":
+        new_index = min(current + 1, len(artifact_storage["artifacts"]) - 1)
+    elif direction == "prev":
+        new_index = max(current - 1, 0)
+    else:
+        new_index = current
+
+    artifact_storage["current_index"] = new_index
+    artifact = artifact_storage["artifacts"][new_index]
+
+    return artifact, f"Artifact {new_index + 1} of {len(artifact_storage['artifacts'])}"
+
+
+def get_current_artifact():
+    """Get the current artifact."""
+    if not artifact_storage["artifacts"]:
+        return None, "No artifacts available"
+
+    current = artifact_storage["current_index"]
+    artifact = artifact_storage["artifacts"][current]
+
+    return artifact, f"Artifact {current + 1} of {len(artifact_storage['artifacts'])}"
+
+
 # Initialize database on module import
 initialize_database()
 
@@ -1449,6 +1870,47 @@ with gr.Blocks(title="Job Search Manager") as demo:
             gr.Markdown("---")
 
             with gr.Row():
+                gr.Markdown("### Cover Letter Generator & Analysis")
+
+            with gr.Row():
+                gr.Markdown(
+                    "Generate a personalized cover letter for any job and get an analysis of how well your materials match the requirements."
+                )
+
+            with gr.Row():
+                cover_letter_job_id = gr.Number(
+                    label="Job ID",
+                    precision=0,
+                    placeholder="Enter job ID from Jobs tab",
+                )
+                generate_cover_letter_btn = gr.Button(
+                    "📝 Generate Cover Letter & Analysis", variant="primary"
+                )
+
+            with gr.Row():
+                cover_letter_status = gr.Textbox(
+                    label="Status", interactive=False, lines=2
+                )
+
+            with gr.Row():
+                generated_cover_letter = gr.Textbox(
+                    label="Generated Cover Letter",
+                    interactive=False,
+                    lines=20,
+                    placeholder="Your personalized cover letter will appear here...",
+                )
+
+            with gr.Row():
+                pros_cons_analysis = gr.Textbox(
+                    label="Pros & Cons Analysis",
+                    interactive=False,
+                    lines=20,
+                    placeholder="Analysis of your materials compared to the job will appear here...",
+                )
+
+            gr.Markdown("---")
+
+            with gr.Row():
                 gr.Markdown("### Tips")
 
             with gr.Row():
@@ -1459,9 +1921,10 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 - **Embed**: Click the embed button to process and store your document in the vector database
                 - **Search**: Use semantic search to find relevant sections in your documents
                 - **AI Matching**: Let AI analyze your documents and find the best job matches automatically
+                - **Cover Letter Generator**: Enter a Job ID to get a personalized cover letter and analysis
                 - Documents are stored separately from job listings for easy reference
                 - Powered by Docling for accurate text extraction from multiple formats
-                - AI matching requires OpenAI API key (OPENAI_API_KEY or OPENAI_EMBEDDING_API_KEY)
+                - AI features require OpenAI API key (OPENAI_API_KEY)
                 """
                 )
 
@@ -1488,6 +1951,195 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 analyze_resume_and_rank_jobs,
                 inputs=[n_jobs],
                 outputs=[match_status, match_results],
+            )
+
+            generate_cover_letter_btn.click(
+                generate_cover_letter_and_analyze,
+                inputs=[cover_letter_job_id],
+                outputs=[
+                    cover_letter_status,
+                    generated_cover_letter,
+                    pros_cons_analysis,
+                ],
+            )
+
+        # AI Resume Coach Tab
+        with gr.Tab("💬 AI Resume Coach"):
+            with gr.Row():
+                gr.Markdown("### Interactive Resume Coaching & Cover Letter Generation")
+
+            with gr.Row():
+                gr.Markdown(
+                    "Chat with an AI career coach to improve your resume and generate personalized cover letters. "
+                    "Cover letters generated in the chat will appear as artifacts in the panel on the right."
+                )
+
+            gr.Markdown("---")
+
+            with gr.Row():
+                with gr.Column(scale=2):
+                    gr.Markdown("<center><h2>💬 Chat with AI Coach</h2></center>")
+                    chat_interface = gr.ChatInterface(
+                        resume_chat,
+                        examples=[
+                            "How can I improve my resume?",
+                            "Write a cover letter for a software engineer position",
+                            "What skills should I highlight?",
+                            "Help me rephrase my experience section",
+                        ],
+                        additional_outputs=[gr.Code(render=False)],
+                        api_name="chat",
+                    )
+
+                with gr.Column(scale=1):
+                    gr.Markdown("<center><h2>📄 Cover Letter Artifacts</h2></center>")
+
+                    with gr.Row():
+                        artifact_counter = gr.Textbox(
+                            label="Artifact",
+                            value="No artifacts",
+                            interactive=False,
+                            scale=2,
+                        )
+
+                    with gr.Row():
+                        prev_btn = gr.Button("◀ Previous", variant="secondary", scale=1)
+                        next_btn = gr.Button("Next ▶", variant="secondary", scale=1)
+
+                    with gr.Row():
+                        artifact_id_display = gr.Textbox(
+                            label="Artifact ID",
+                            interactive=False,
+                            placeholder="ID will appear here...",
+                        )
+
+                    with gr.Row():
+                        artifact_context = gr.Textbox(
+                            label="Context",
+                            interactive=False,
+                            lines=2,
+                            placeholder="Request context will appear here...",
+                        )
+
+                    cover_letter_artifact = gr.Code(
+                        label="Generated Cover Letter",
+                        language="text",
+                        lines=25,
+                        placeholder="Cover letters generated in the chat will appear here...",
+                    )
+
+            gr.Markdown("---")
+
+            with gr.Row():
+                gr.Markdown("### Export Cover Letter to PDF")
+
+            with gr.Row():
+                gr.Markdown(
+                    "Export the cover letter from the artifacts panel to a PDF file for easy sharing and printing."
+                )
+
+            with gr.Row():
+                export_pdf_btn = gr.Button("📄 Export to PDF", variant="primary")
+                pdf_status = gr.Textbox(label="Status", interactive=False)
+
+            gr.Markdown("---")
+
+            with gr.Row():
+                gr.Markdown("### Tips")
+
+            with gr.Row():
+                gr.Markdown(
+                    """
+                - **Chat**: Ask questions about resume improvement, cover letter writing, and career advice
+                - **Cover Letters**: Request cover letters for specific jobs or roles, and they'll appear in the artifacts panel
+                - **Export**: Click "Export to PDF" to save the cover letter from the artifacts panel
+                - **Context**: The AI has access to your uploaded resume and cover letter for personalized advice
+                - **Conversation**: The AI remembers your conversation history for context-aware responses
+                - Requires OpenAI API key (OPENAI_API_KEY) and uploaded resume
+                """
+                )
+
+            # Event handlers
+            chat_interface.additional_outputs[0].render()
+            chat_interface.additional_outputs[0] = cover_letter_artifact
+
+            def update_artifact_display(artifact_dict):
+                """Update artifact display from dictionary."""
+                if artifact_dict is None:
+                    return "No artifacts", "", "", ""
+
+                return (
+                    f"Artifact {artifact_storage['current_index'] + 1} of {len(artifact_storage['artifacts'])}",
+                    artifact_dict.get("id", ""),
+                    artifact_dict.get("context", ""),
+                    artifact_dict.get("content", ""),
+                )
+
+            def on_chat_response(response, artifact_dict):
+                """Handle chat response and update artifact display."""
+                if artifact_dict:
+                    return update_artifact_display(artifact_dict)
+                return "No artifacts", "", "", ""
+
+            # Navigation handlers
+            prev_btn.click(
+                lambda: navigate_artifacts("prev"),
+                outputs=[cover_letter_artifact, artifact_counter],
+            ).then(
+                lambda: get_current_artifact(),
+                outputs=[cover_letter_artifact, artifact_counter],
+            ).then(
+                lambda artifact: update_artifact_display(artifact),
+                inputs=[cover_letter_artifact],
+                outputs=[
+                    artifact_counter,
+                    artifact_id_display,
+                    artifact_context,
+                    cover_letter_artifact,
+                ],
+            )
+
+            next_btn.click(
+                lambda: navigate_artifacts("next"),
+                outputs=[cover_letter_artifact, artifact_counter],
+            ).then(
+                lambda: get_current_artifact(),
+                outputs=[cover_letter_artifact, artifact_counter],
+            ).then(
+                lambda artifact: update_artifact_display(artifact),
+                inputs=[cover_letter_artifact],
+                outputs=[
+                    artifact_counter,
+                    artifact_id_display,
+                    artifact_context,
+                    cover_letter_artifact,
+                ],
+            )
+
+            def export_cover_letter_pdf(cover_letter_text):
+                if not cover_letter_text or not cover_letter_text.strip():
+                    return (
+                        "Error: No cover letter to export. Generate a cover letter in the chat first.",
+                        None,
+                    )
+
+                # Try to extract job title and company from cover letter
+                lines = cover_letter_text.split("\n")
+                job_title = "Position"
+                company = "Company"
+
+                for line in lines:
+                    if "position" in line.lower() or "role" in line.lower():
+                        job_title = line.strip()
+                    if "company" in line.lower():
+                        company = line.strip()
+
+                return export_cover_letter_to_pdf(cover_letter_text, job_title, company)
+
+            export_pdf_btn.click(
+                export_cover_letter_pdf,
+                inputs=[cover_letter_artifact],
+                outputs=[pdf_status, gr.File(visible=False)],
             )
 
         # Run Commands Tab
