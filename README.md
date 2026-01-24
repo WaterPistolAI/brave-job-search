@@ -8,7 +8,7 @@ A high-efficiency Python script that uses the **Brave Search API** to search acr
 
 ### ✨ Key Features
 
-* **ATS Targeting:** Searches directly on `ashbyhq.com`, `greenhouse.io`, `lever.co`, and more.
+* **ATS Targeting:** Searches directly on `greenhouse.io`, `lever.co`, and more.
 * **Rate Limit Protection:** Strictly respects the **1 request per second** limit.
 * **Usage Tracking:** Maintains a local `api_usage.json` to ensure you never exceed the **2,000 requests/month** limit.
 * **Freshness Filter:** Automatically filters for roles posted in the **last week** to ensure leads are active.

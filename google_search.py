@@ -210,12 +210,12 @@ def main():
         default='["(GenAI | Generative AI | LLM) ( Application | Applied ) (Engineer | Developer)", "(Data) (Scientist | Science)"]',
         help="JSON array of search queries",
     )
-    # parser.add_argument(
-    #     "--ats-domains",
-    #     type=str,
-    #     default='["jobs.ashbyhq.com", "boards.greenhouse.io", "jobs.lever.co", "jobs.smartrecruiters.com", "jobs.workable.com", "wd1.myworkdayjobs.com", "jobs.jobvite.com", "careers.icims.com", "www.levels.fyi/jobs"]',
-    #     help="JSON array of ATS domains to search",
-    # )
+    parser.add_argument(
+        "--ats-domains",
+        type=str,
+        default='["boards.greenhouse.io", "jobs.lever.co", "jobs.smartrecruiters.com", "jobs.workable.com", "wd1.myworkdayjobs.com", "jobs.jobvite.com", "careers.icims.com", "www.levels.fyi/jobs"]',
+        help="JSON array of ATS domains to search",
+    )
     parser.add_argument(
         "--output",
         type=str,

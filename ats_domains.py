@@ -5,23 +5,6 @@ Each domain has specific scraping and verification requirements.
 
 # Supported ATS domains with their configurations
 SUPPORTED_ATS_DOMAINS = {
-    # "jobs.ashbyhq.com": {
-    #     "name": "Ashby",
-    #     "description": "Ashby ATS",
-    #     "scraping_adapter": "AshbyAdapter",
-    #     "expired_selectors": [
-    #         {
-    #             "selector": "h1[class*='_title']",
-    #             "text": "job not found",
-    #             "case_sensitive": False,
-    #         },
-    #         {
-    #             "selector": "h1[class*='_title']",
-    #             "text": "position not found",
-    #             "case_sensitive": False,
-    #         },
-    #     ],
-    # },
     "boards.greenhouse.io": {
         "name": "Greenhouse",
         "description": "Greenhouse ATS",
