@@ -2021,11 +2021,9 @@ with gr.Blocks(title="Job Search Manager") as demo:
                             placeholder="Request context will appear here...",
                         )
 
-                    cover_letter_artifact = gr.Code(
+                    cover_letter_artifact = gr.Markdown(
                         label="Generated Cover Letter",
-                        language="text",
-                        lines=25,
-                        placeholder="Cover letters generated in the chat will appear here...",
+                        value="Cover letters generated in the chat will appear here...",
                     )
 
             gr.Markdown("---")
@@ -2068,11 +2066,30 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 if artifact_dict is None:
                     return "No artifacts", "", "", ""
 
+                # Format content as Markdown for better readability
+                content = artifact_dict.get("content", "")
+
+                # Convert URLs to clickable Markdown links
+                import re
+
+                url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+
+                def replace_url(match):
+                    url = match.group(0)
+                    return f"[{url}]({url})"
+
+                markdown_content = re.sub(url_pattern, replace_url, content)
+
+                # Preserve line breaks
+                markdown_content = markdown_content.replace("\n\n", "\n\n").replace(
+                    "\n", "\n"
+                )
+
                 return (
                     f"Artifact {artifact_storage['current_index'] + 1} of {len(artifact_storage['artifacts'])}",
                     artifact_dict.get("id", ""),
                     artifact_dict.get("context", ""),
-                    artifact_dict.get("content", ""),
+                    markdown_content,
                 )
 
             def on_chat_response(response, artifact_dict):
