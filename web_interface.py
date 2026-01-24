@@ -260,11 +260,8 @@ def get_jobs_filtered(status_filter="all", search_query=""):
 
     df = pd.DataFrame([dict(job) for job in jobs])
 
-    # Convert URL column to clickable links
-    if "url" in df.columns:
-        df["url"] = df["url"].apply(
-            lambda x: f'<a href="{x}" target="_blank">View Job</a>'
-        )
+    # URLs are displayed as plain text in the dataframe
+    # Users can view the full URL in the job details section
 
     return df
 
