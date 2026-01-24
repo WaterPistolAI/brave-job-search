@@ -594,36 +594,107 @@ class ICIMSAdapter(BaseScraperAdapter):
             "salary": "",
         }
 
-        # iCIMS uses specific data attributes and classes
-        # Job description
-        desc_elem = soup.find(
-            "div", {"data-automation-id": "jobDescription"}
-        ) or soup.find("div", class_="job-description")
-        if desc_elem:
-            details["job_description"] = self._clean_text(desc_elem.get_text())
-
-        # Requirements
-        req_elem = soup.find(
-            "div", {"data-automation-id": "qualifications"}
-        ) or soup.find("div", class_="qualifications")
-        if req_elem:
-            details["requirements"] = self._clean_text(req_elem.get_text())
-
-        # Location
-        location_elem = soup.find(
-            "div", {"data-automation-id": "location"}
-        ) or soup.find("span", class_="location")
-        if location_elem:
-            details["location"] = self._clean_text(location_elem.get_text())
-
-        # Company
-        company_elem = soup.find("div", class_="company-name") or soup.find(
-            "span", class_="company"
+        # iCIMS uses specific class structure with potentially dynamic suffixes
+        # Main job content container - handle dynamic class names like iCIMS_ff147
+        job_content = (
+            soup.find("div", class_=lambda x: x and "iCIMS_JobContent" in x)
+            or soup.find("div", class_=lambda x: x and "iCIMS_JobContainer" in x)
+            or soup.find("div", class_=lambda x: x and "iCIMS_JobPage" in x)
         )
-        if company_elem:
-            details["company"] = self._clean_text(company_elem.get_text())
 
-        # Salary
+        # Extract company name from job header tags
+        company_elem = None
+        if job_content:
+            # Look for Company field in header tags
+            header_tags = job_content.find_all(
+                "dt", class_=lambda x: x and "iCIMS_JobHeaderField" in x
+            )
+            for tag in header_tags:
+                if tag.get_text().strip() == "Company":
+                    company_elem = tag.find_next_sibling(
+                        "dd", class_=lambda x: x and "iCIMS_JobHeaderData" in x
+                    )
+                    if company_elem:
+                        details["company"] = self._clean_text(company_elem.get_text())
+                        break
+
+        # Fallback: extract company from URL
+        if not details["company"]:
+            company_match = re.search(r"//([^/]+)\.icims\.com", url)
+            if company_match:
+                details["company"] = company_match.group(1).replace("-", " ").title()
+
+        # Extract location from header section
+        if job_content:
+            # Look for location in the header left section
+            location_container = job_content.find(
+                "div", class_=lambda x: x and "header left" in x
+            )
+            if location_container:
+                # Location is typically in a span after the "Job Location" label
+                spans = location_container.find_all("span")
+                for span in spans:
+                    text = self._clean_text(span.get_text())
+                    # Skip the label and get the actual location
+                    if text and "Job Location" not in text:
+                        details["location"] = text
+                        break
+
+        # Extract job description from iCIMS_InfoMsg sections
+        # Look for sections with specific headers
+        info_sections = (
+            job_content.find_all(
+                "h2", class_=lambda x: x and "iCIMS_InfoField_Job" in x
+            )
+            if job_content
+            else []
+        )
+
+        for section_header in info_sections:
+            header_text = self._clean_text(section_header.get_text()).lower()
+
+            # Get the content div that follows this header
+            content_div = section_header.find_next_sibling(
+                "div", class_=lambda x: x and "iCIMS_InfoMsg_Job" in x
+            )
+
+            if content_div:
+                # Get text from the expandable text container
+                expandable_text = content_div.find(
+                    "div", class_=lambda x: x and "iCIMS_Expandable_Text" in x
+                )
+                if expandable_text:
+                    section_content = self._clean_text(expandable_text.get_text())
+
+                    # Categorize based on header text
+                    if "job summary" in header_text or "description" in header_text:
+                        details["job_description"] = section_content
+                    elif "requirement" in header_text or "qualification" in header_text:
+                        details["requirements"] = section_content
+                    elif "benefit" in header_text or "what we offer" in header_text:
+                        details["benefits"] = section_content
+
+        # If we didn't find structured sections, try to extract from all info messages
+        if not details["job_description"]:
+            info_msgs = (
+                job_content.find_all(
+                    "div", class_=lambda x: x and "iCIMS_InfoMsg_Job" in x
+                )
+                if job_content
+                else []
+            )
+            if info_msgs:
+                # Use the first info message as job description
+                first_msg = info_msgs[0]
+                expandable_text = first_msg.find(
+                    "div", class_=lambda x: x and "iCIMS_Expandable_Text" in x
+                )
+                if expandable_text:
+                    details["job_description"] = self._clean_text(
+                        expandable_text.get_text()
+                    )
+
+        # Salary - look for salary information in the content
         salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
         for keyword in salary_keywords:
             element = soup.find(
