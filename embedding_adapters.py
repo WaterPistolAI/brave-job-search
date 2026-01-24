@@ -101,10 +101,27 @@ class OpenAIEmbeddingAdapter(BaseEmbeddingAdapter):
             "model_name": self.model_name,
         }
 
+        # Try to use openai_api_base if supported, otherwise ignore base_url
+        # Some versions of ChromaDB don't support custom base URLs
         if self.base_url:
-            kwargs["openai_api_base"] = self.base_url
+            try:
+                # Try with openai_api_base parameter
+                test_kwargs = kwargs.copy()
+                test_kwargs["openai_api_base"] = self.base_url
+                self.embedding_function = OpenAIEmbeddingFunction(**test_kwargs)
+            except TypeError:
+                # If openai_api_base is not supported, initialize without it
+                # and log a warning
+                import logging
 
-        self.embedding_function = OpenAIEmbeddingFunction(**kwargs)
+                logging.warning(
+                    "OpenAIEmbeddingFunction does not support custom base_url in this version. "
+                    "Using default OpenAI endpoint. To use a custom endpoint, set OPENAI_API_BASE_URL "
+                    "environment variable and use the OpenAI client directly."
+                )
+                self.embedding_function = OpenAIEmbeddingFunction(**kwargs)
+        else:
+            self.embedding_function = OpenAIEmbeddingFunction(**kwargs)
 
         # Set dimension based on model or custom dimension
         if dimension is not None:
