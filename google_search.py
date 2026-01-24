@@ -18,13 +18,25 @@ GOOGLE_SEARCH_API_KEY = os.environ.get("GOOGLE_SEARCH_API_KEY", "")
 GOOGLE_SEARCH_ID = os.environ.get("GOOGLE_SEARCH_ID", "")
 GOOGLE_SEARCH_RATE_LIMIT = float(os.environ.get("GOOGLE_SEARCH_RATE_LIMIT", "1.1"))
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    filename="google_search.log",
-    filemode="a",
-    format="%(asctime)s - %(levelname)s - %(message)s",
+# Configure logging to output to both console and file
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# File handler
+file_handler = logging.FileHandler("google_search.log", mode="a")
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 )
+logger.addHandler(file_handler)
+
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+)
+logger.addHandler(console_handler)
 
 
 class GoogleSearchAPI:

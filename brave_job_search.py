@@ -27,12 +27,25 @@ BRAVE_JOB_SEARCH_LOGFILE = os.environ.get(
 )
 BRAVE_FRESHNESS = os.environ.get("BRAVE_FRESHNESS", "pd")
 
-logging.basicConfig(
-    level=logging.INFO,
-    filename=BRAVE_JOB_SEARCH_LOGFILE,
-    filemode="a",
-    format="%(asctime)s - %(levelname)s - %(message)s",
+# Configure logging to output to both console and file
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# File handler
+file_handler = logging.FileHandler(BRAVE_JOB_SEARCH_LOGFILE, mode="a")
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 )
+logger.addHandler(file_handler)
+
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+)
+logger.addHandler(console_handler)
 
 def load_list_from_env(key, default_val):
     raw_value = os.environ.get(key)
