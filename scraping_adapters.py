@@ -190,48 +190,62 @@ class LeverAdapter(BaseScraperAdapter):
         if company_match:
             details["company"] = company_match.group(1).replace("-", " ").title()
 
-        # Lever typically uses specific sections
-        # Job description
-        desc_section = soup.find("div", class_="description") or soup.find(
-            "section", class_="description"
-        )
-        if desc_section:
-            details["job_description"] = self._clean_text(desc_section.get_text())
-
-        # Requirements
-        req_section = soup.find("div", class_="requirements") or soup.find(
-            "section", class_="requirements"
-        )
-        if req_section:
-            details["requirements"] = self._clean_text(req_section.get_text())
-
-        # Benefits
-        benefit_section = soup.find("div", class_="benefits") or soup.find(
-            "section", class_="benefits"
-        )
-        if benefit_section:
-            details["benefits"] = self._clean_text(benefit_section.get_text())
-
-        # Location
-        location_elem = soup.find("span", class_="location") or soup.find(
-            "div", class_="location"
-        )
+        # Extract location from posting categories
+        location_elem = soup.find("div", class_=lambda x: x and "location" in x)
         if location_elem:
             details["location"] = self._clean_text(location_elem.get_text())
 
-        # Salary
-        salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
-        for keyword in salary_keywords:
-            element = soup.find(
-                text=lambda text: text and keyword.lower() in text.lower()
-            )
-            if element:
-                parent = element.parent
-                if parent:
-                    text = self._clean_text(parent.get_text())
-                    if "$" in text or any(c.isdigit() for c in text):
-                        details["salary"] = text
-                        break
+        # Extract job description from data-qa attribute
+        desc_section = soup.find("div", {"data-qa": "job-description"})
+        if desc_section:
+            details["job_description"] = self._clean_text(desc_section.get_text())
+
+        # Extract requirements - look for section with "What We Require" or similar heading
+        sections = soup.find_all("div", class_="section")
+        for section in sections:
+            heading = section.find("h3")
+            if heading:
+                heading_text = heading.get_text().lower()
+                if any(
+                    keyword in heading_text
+                    for keyword in [
+                        "what we require",
+                        "requirement",
+                        "qualification",
+                        "core responsibilities",
+                    ]
+                ):
+                    details["requirements"] = self._clean_text(section.get_text())
+                    break
+
+        # Extract benefits - look for section with "Benefits" or "What We Value" heading
+        for section in sections:
+            heading = section.find("h3")
+            if heading:
+                heading_text = heading.get_text().lower()
+                if any(
+                    keyword in heading_text
+                    for keyword in ["benefit", "what we value", "perks"]
+                ):
+                    details["benefits"] = self._clean_text(section.get_text())
+                    break
+
+        # Extract salary from closing description section
+        closing_section = soup.find("div", {"data-qa": "closing-description"})
+        if closing_section:
+            # Look for salary information in the closing section
+            salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
+            for keyword in salary_keywords:
+                element = closing_section.find(
+                    text=lambda text: text and keyword.lower() in text.lower()
+                )
+                if element:
+                    parent = element.parent
+                    if parent:
+                        text = self._clean_text(parent.get_text())
+                        if "$" in text or any(c.isdigit() for c in text):
+                            details["salary"] = text
+                            break
 
         return details
 
@@ -490,29 +504,60 @@ class JobviteAdapter(BaseScraperAdapter):
         if company_match:
             details["company"] = company_match.group(1).replace("-", " ").title()
 
-        # Jobvite uses specific data attributes
-        # Job description
-        desc_elem = soup.find("div", {"data-testid": "job-description"}) or soup.find(
-            "div", class_="job-description"
-        )
+        # Extract location from job detail meta
+        meta_elem = soup.find("p", class_="jv-job-detail-meta")
+        if meta_elem:
+            # The meta contains department and location separated by separator
+            meta_text = self._clean_text(meta_elem.get_text())
+            # Try to extract location (usually the second part after separator)
+            parts = meta_text.split("\n")
+            if len(parts) > 1:
+                details["location"] = self._clean_text(parts[-1])
+
+        # Extract job description from jv-job-detail-description div
+        desc_elem = soup.find("div", class_="jv-job-detail-description")
         if desc_elem:
             details["job_description"] = self._clean_text(desc_elem.get_text())
 
-        # Requirements
-        req_elem = soup.find("div", {"data-testid": "requirements"}) or soup.find(
-            "div", class_="requirements"
-        )
-        if req_elem:
-            details["requirements"] = self._clean_text(req_elem.get_text())
+        # Extract requirements - look for "Required Experience & Skills" or similar
+        desc_text = details["job_description"].lower()
+        if "required experience" in desc_text or "required skills" in desc_text:
+            # Try to extract the requirements section
+            req_keywords = [
+                "required experience",
+                "required skills",
+                "qualification",
+                "what we require",
+            ]
+            for keyword in req_keywords:
+                if keyword in desc_text:
+                    # Find the section containing this keyword
+                    element = soup.find(
+                        text=lambda text: text and keyword.lower() in text.lower()
+                    )
+                    if element:
+                        parent = element.parent
+                        if parent:
+                            details["requirements"] = self._clean_text(
+                                parent.get_text()
+                            )
+                            break
 
-        # Location
-        location_elem = soup.find("div", {"data-testid": "location"}) or soup.find(
-            "span", class_="location"
-        )
-        if location_elem:
-            details["location"] = self._clean_text(location_elem.get_text())
+        # Extract benefits - look for "Compensation" or "Benefits" section
+        if "compensation" in desc_text or "benefits" in desc_text:
+            benefit_keywords = ["compensation", "benefits", "what we offer"]
+            for keyword in benefit_keywords:
+                if keyword in desc_text:
+                    element = soup.find(
+                        text=lambda text: text and keyword.lower() in text.lower()
+                    )
+                    if element:
+                        parent = element.parent
+                        if parent:
+                            details["benefits"] = self._clean_text(parent.get_text())
+                            break
 
-        # Salary
+        # Salary - look for salary information in the description
         salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
         for keyword in salary_keywords:
             element = soup.find(
