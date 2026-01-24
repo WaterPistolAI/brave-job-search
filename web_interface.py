@@ -1414,10 +1414,15 @@ Remember: Your role is to guide and empower, not to take over. Help them tell th
                 )
 
             # Add conversation history
-            for user_msg, assistant_msg in history:
-                messages.append({"role": "user", "content": user_msg})
-                if assistant_msg:
-                    messages.append({"role": "assistant", "content": assistant_msg})
+            for msg in history:
+                if isinstance(msg, dict):
+                    messages.append(msg)
+                else:
+                    # Handle old tuple format for backward compatibility
+                    user_msg, assistant_msg = msg
+                    messages.append({"role": "user", "content": user_msg})
+                    if assistant_msg:
+                        messages.append({"role": "assistant", "content": assistant_msg})
 
             # Add current message
             messages.append({"role": "user", "content": message})
@@ -2192,15 +2197,19 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 if not cover_letter or not analysis:
                     return status, None, None, None
 
-                # Create chat history with pros/cons first, then cover letter
+                # Create chat history with cover letter first (in RST/Markdown format), then analysis, then follow-up question
                 chat_history = [
+                    {
+                        "role": "assistant",
+                        "content": f"## 📄 Personalized Cover Letter\n\n{cover_letter}",
+                    },
                     {
                         "role": "assistant",
                         "content": f"## 📋 Analysis for Job #{job_id}\n\n{job_dict['title']} at {job_dict['company']}\n\n{analysis}",
                     },
                     {
                         "role": "assistant",
-                        "content": f"## 📄 Personalized Cover Letter\n\n{cover_letter}",
+                        "content": "I've generated a cover letter and analysis for this position. To help me create an even better cover letter, could you tell me:\n\n- What specific achievements or projects would you like me to highlight?\n- Are there any particular aspects of the company or role that excite you?\n- Do you have any connections to the company or team?\n\nThis information will help me tailor the cover letter more effectively.",
                     },
                 ]
 
@@ -2368,13 +2377,13 @@ with gr.Blocks(title="Job Search Manager") as demo:
                     return history, history
 
                 # Add user message to history
-                history.append((message, None))
+                history.append({"role": "user", "content": message})
 
                 # Get AI response
                 response, artifact = resume_chat(message, history)
 
                 # Add AI response to history
-                history[-1] = (message, response)
+                history[-1] = {"role": "assistant", "content": response}
 
                 # Update artifact display if there's a new artifact
                 if artifact:
@@ -2384,12 +2393,6 @@ with gr.Blocks(title="Job Search Manager") as demo:
                     return history, history, counter, artifact_id, context, content
 
                 return history, history, "No artifacts", "", "", ""
-
-            def start_chat_on_embed():
-                """Auto-start chat when resume is embedded."""
-                # Get initial greeting from AI
-                greeting, _ = resume_chat("", [])
-                return [(None, greeting)]
 
             # Wire up send button and chat input
             send_btn.click(
@@ -2421,13 +2424,13 @@ with gr.Blocks(title="Job Search Manager") as demo:
             # Wire up Start Chat button to load greeting
             start_chat_btn.click(
                 lambda: [
-                    (
-                        None,
-                        chat_greeting_state.get(
+                    {
+                        "role": "assistant",
+                        "content": chat_greeting_state.get(
                             "greeting",
                             "Hello! I'm your AI career coach. How can I help you with your resume or cover letter today?",
                         ),
-                    )
+                    }
                 ],
                 outputs=[chat_history],
             )
