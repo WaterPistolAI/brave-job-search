@@ -15,7 +15,8 @@ from ats_domains import get_expired_indicators, get_domain_config
 from pathos.multiprocessing import ProcessingPool as Pool
 from urllib.parse import urlparse
 import json
-from ratelimit import limits, sleep_and_retry
+from pyrate_limiter import Duration, Rate, limiter_factory, MultiprocessBucket
+from pyrate_limiter.extras.httpx_limiter import RateLimiterTransport
 from queue import Queue
 
 load_dotenv()
@@ -270,29 +271,39 @@ class JobDatabase:
 
 
 class RateLimiter:
-    """Rate limiter for per-domain request limiting using ratelimit package."""
+    """Rate limiter for per-domain request limiting using pyrate_limiter."""
 
     def __init__(self, requests_per_minute: int):
         self.requests_per_minute = requests_per_minute
-        # Calculate the minimum period between requests in seconds
-        self.min_period = 60 / requests_per_minute
+        # Create rate: X requests per minute
+        self.rate = Rate(requests_per_minute, Duration.MINUTE)
+        # Create in-memory bucket
+        self.bucket = limiter_factory.create_inmemory_limiter(
+            rate_per_duration=requests_per_minute, duration=Duration.MINUTE
+        )
+        # Create httpx transport with rate limiting
+        self.transport = RateLimiterTransport(limiter=self.bucket)
+        # Create httpx client with rate-limited transport
+        self.client = httpx.Client(
+            transport=self.transport,
+            timeout=REQUEST_TIMEOUT,
+            follow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            },
+        )
 
-    @sleep_and_retry
-    @limits(calls=1, period=int(60 / 5))  # Default: 5 requests per minute
     def make_request(self, url: str) -> Tuple[int, str]:
         """
         Make an HTTP request with rate limiting.
         Returns (status_code, html_content).
         """
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
-
-        response = httpx.get(
-            url, headers=headers, timeout=REQUEST_TIMEOUT, follow_redirects=True
-        )
-
+        response = self.client.get(url)
         return response.status_code, response.text
+
+    def close(self):
+        """Close the httpx client."""
+        self.client.close()
 
 
 def verify_job_with_rate_limit(
@@ -539,7 +550,7 @@ def process_jobs_multiprocess(
     jobs: List[Dict], rate_limit: int = GLOBAL_RATE_LIMIT
 ) -> List[Dict]:
     """
-    Process jobs using ThreadPool with per-domain rate limiting.
+    Process jobs using multiprocessing with per-domain rate limiting.
     """
     # Group jobs by domain
     domain_jobs = {}
@@ -555,8 +566,16 @@ def process_jobs_multiprocess(
     # Create a queue for results
     result_queue = Queue()
 
+    # Create multiprocess bucket for rate limiting across processes
+    rate = Rate(rate_limit, Duration.MINUTE)
+    bucket = MultiprocessBucket.init([rate])
+
     # Create a thread for each domain using ThreadPool
-    with Pool(processes=len(domain_jobs)) as pool:
+    with Pool(
+        processes=len(domain_jobs),
+        initializer=limiter_factory.init_global_limiter,
+        initargs=(bucket,),
+    ) as pool:
         # Submit tasks for each domain
         pool.starmap(
             process_domain_jobs,
