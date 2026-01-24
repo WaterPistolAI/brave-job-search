@@ -56,111 +56,193 @@ class GreenhouseAdapter(BaseScraperAdapter):
             "salary": "",
         }
 
-        # Extract company name from URL or page
-        company_match = re.search(r"boards\.greenhouse\.io/([^/]+)", url)
-        if company_match:
-            details["company"] = company_match.group(1).replace("-", " ").title()
+        # Check if this is the new Greenhouse structure
+        is_new_structure = soup.find("main", class_=lambda x: x and "job-post" in x)
 
-        # Job description - Greenhouse typically uses specific sections
-        # Look for the main content section
-        main_content = soup.find("div", class_="section") or soup.find(
-            "div", id="content"
-        )
+        if is_new_structure:
+            # New Greenhouse structure
+            # Extract company name from URL
+            company_match = re.search(r"boards\.greenhouse\.io/([^/]+)", url)
+            if company_match:
+                details["company"] = company_match.group(1).replace("-", " ").title()
 
-        if main_content:
-            # Extract all paragraphs from the main content
-            paragraphs = main_content.find_all("p")
-            description_parts = []
-            requirements_parts = []
-            benefits_parts = []
+            # Extract location from job__location div
+            location_elem = soup.find(
+                "div", class_=lambda x: x and "job__location" in x
+            )
+            if location_elem:
+                # Location is in a div inside job__location
+                location_div = location_elem.find("div")
+                if location_div:
+                    details["location"] = self._clean_text(location_div.get_text())
 
-            current_section = "description"
+            # Extract job description from job__description.body div
+            desc_container = soup.find(
+                "div", class_=lambda x: x and "job__description" in x and "body" in x
+            )
+            if desc_container:
+                # Get all content divs
+                content_divs = desc_container.find_all("div", recursive=False)
+                description_parts = []
+                requirements_parts = []
+                benefits_parts = []
+                current_section = "description"
 
-            for p in paragraphs:
-                text = self._clean_text(p.get_text())
-                if not text:
-                    continue
+                for content_div in content_divs:
+                    # Get all text content from this div
+                    text = self._clean_text(content_div.get_text())
+                    if not text:
+                        continue
 
-                # Detect section headers
-                text_lower = text.lower()
-                if any(
-                    keyword in text_lower
-                    for keyword in [
-                        "requirement",
-                        "qualification",
-                        "what you need",
-                        "what we need",
-                    ]
-                ):
-                    current_section = "requirements"
-                    continue
-                elif any(
-                    keyword in text_lower
-                    for keyword in [
-                        "benefit",
-                        "perk",
-                        "what we offer",
-                        "compensation",
-                        "package",
-                    ]
-                ):
-                    current_section = "benefits"
-                    continue
+                    # Check for section headers (h3 or strong tags)
+                    header = content_div.find("h3") or content_div.find("strong")
+                    if header:
+                        header_text = header.get_text().lower()
+                        if "about" in header_text and "role" in header_text:
+                            current_section = "description"
+                        elif "about" in header_text and "company" in header_text:
+                            current_section = "description"
+                        elif (
+                            "duties" in header_text or "responsibilities" in header_text
+                        ):
+                            current_section = "description"
+                        elif "qualification" in header_text or "skills" in header_text:
+                            current_section = "requirements"
+                        elif "benefit" in header_text or "what we offer" in header_text:
+                            current_section = "benefits"
 
-                # Add to appropriate section
-                if current_section == "description":
-                    description_parts.append(text)
-                elif current_section == "requirements":
-                    requirements_parts.append(text)
-                elif current_section == "benefits":
-                    benefits_parts.append(text)
+                    # Add to appropriate section
+                    if current_section == "description":
+                        description_parts.append(text)
+                    elif current_section == "requirements":
+                        requirements_parts.append(text)
+                    elif current_section == "benefits":
+                        benefits_parts.append(text)
 
-            details["job_description"] = "\n".join(description_parts)
-            details["requirements"] = "\n".join(requirements_parts)
-            details["benefits"] = "\n".join(benefits_parts)
+                details["job_description"] = "\n".join(description_parts)
+                details["requirements"] = "\n".join(requirements_parts)
+                details["benefits"] = "\n".join(benefits_parts)
 
-        # Location - Greenhouse typically has a specific location element
-        location_elem = soup.find("div", class_="location") or soup.find(
-            "span", class_="location"
-        )
-        if location_elem:
-            details["location"] = self._clean_text(location_elem.get_text())
-
-        # Try to find location in the header or sidebar
-        if not details["location"]:
-            location_patterns = [
-                soup.find("div", class_="sidebar"),
-                soup.find("div", class_="header"),
+            # Extract salary - look for salary range patterns
+            salary_patterns = [
+                r"salary range is \$[\d,]+ - \$[\d,]+",
+                r"base salary range is \$[\d,]+ - \$[\d,]+",
+                r"\$[\d,]+ - \$[\d,]+",
             ]
-            for pattern in location_patterns:
-                if pattern:
-                    location_text = pattern.get_text()
-                    if "location" in location_text.lower():
-                        # Extract location text
-                        lines = location_text.split("\n")
-                        for line in lines:
-                            if "location" in line.lower():
-                                details["location"] = self._clean_text(
-                                    line.replace("location", "").replace(":", "")
-                                )
-                                break
+            page_text = soup.get_text()
+            for pattern in salary_patterns:
+                match = re.search(pattern, page_text, re.IGNORECASE)
+                if match:
+                    details["salary"] = match.group(0)
+                    break
 
-        # Salary - Look for salary information
-        salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
-        page_text = soup.get_text().lower()
-        for keyword in salary_keywords:
-            if keyword in page_text:
-                # Find the element containing this keyword
-                element = soup.find(
-                    text=lambda text: text and keyword.lower() in text.lower()
-                )
-                if element:
-                    parent = element.parent
-                    if parent:
-                        text = self._clean_text(parent.get_text())
-                        if "$" in text or any(c.isdigit() for c in text):
-                            details["salary"] = text
-                            break
+        else:
+            # Legacy Greenhouse structure
+            # Extract company name from URL or page
+            company_match = re.search(r"boards\.greenhouse\.io/([^/]+)", url)
+            if company_match:
+                details["company"] = company_match.group(1).replace("-", " ").title()
+
+            # Job description - Greenhouse typically uses specific sections
+            # Look for the main content section
+            main_content = soup.find("div", class_="section") or soup.find(
+                "div", id="content"
+            )
+
+            if main_content:
+                # Extract all paragraphs from the main content
+                paragraphs = main_content.find_all("p")
+                description_parts = []
+                requirements_parts = []
+                benefits_parts = []
+
+                current_section = "description"
+
+                for p in paragraphs:
+                    text = self._clean_text(p.get_text())
+                    if not text:
+                        continue
+
+                    # Detect section headers
+                    text_lower = text.lower()
+                    if any(
+                        keyword in text_lower
+                        for keyword in [
+                            "requirement",
+                            "qualification",
+                            "what you need",
+                            "what we need",
+                        ]
+                    ):
+                        current_section = "requirements"
+                        continue
+                    elif any(
+                        keyword in text_lower
+                        for keyword in [
+                            "benefit",
+                            "perk",
+                            "what we offer",
+                            "compensation",
+                            "package",
+                        ]
+                    ):
+                        current_section = "benefits"
+                        continue
+
+                    # Add to appropriate section
+                    if current_section == "description":
+                        description_parts.append(text)
+                    elif current_section == "requirements":
+                        requirements_parts.append(text)
+                    elif current_section == "benefits":
+                        benefits_parts.append(text)
+
+                details["job_description"] = "\n".join(description_parts)
+                details["requirements"] = "\n".join(requirements_parts)
+                details["benefits"] = "\n".join(benefits_parts)
+
+            # Location - Greenhouse typically has a specific location element
+            location_elem = soup.find("div", class_="location") or soup.find(
+                "span", class_="location"
+            )
+            if location_elem:
+                details["location"] = self._clean_text(location_elem.get_text())
+
+            # Try to find location in the header or sidebar
+            if not details["location"]:
+                location_patterns = [
+                    soup.find("div", class_="sidebar"),
+                    soup.find("div", class_="header"),
+                ]
+                for pattern in location_patterns:
+                    if pattern:
+                        location_text = pattern.get_text()
+                        if "location" in location_text.lower():
+                            # Extract location text
+                            lines = location_text.split("\n")
+                            for line in lines:
+                                if "location" in line.lower():
+                                    details["location"] = self._clean_text(
+                                        line.replace("location", "").replace(":", "")
+                                    )
+                                    break
+
+            # Salary - Look for salary information
+            salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
+            page_text = soup.get_text().lower()
+            for keyword in salary_keywords:
+                if keyword in page_text:
+                    # Find the element containing this keyword
+                    element = soup.find(
+                        text=lambda text: text and keyword.lower() in text.lower()
+                    )
+                    if element:
+                        parent = element.parent
+                        if parent:
+                            text = self._clean_text(parent.get_text())
+                            if "$" in text or any(c.isdigit() for c in text):
+                                details["salary"] = text
+                                break
 
         return details
 
@@ -277,11 +359,6 @@ class WorkdayAdapter(BaseScraperAdapter):
 
         if is_new_structure:
             # New Workday structure with CSS classes
-            # Extract job title from h2 with css-7papts class
-            job_title_elem = soup.find("h2", class_=lambda x: x and "css-7papts" in x)
-            if job_title_elem:
-                # Job title is already captured elsewhere, but we can use it for context
-
             # Extract description from the main content area
             # Look for div with css-oplht1 class (description container)
             desc_container = soup.find(
@@ -438,48 +515,125 @@ class SmartRecruitersAdapter(BaseScraperAdapter):
             "salary": "",
         }
 
-        # SmartRecruiters uses specific data attributes
-        # Job description
-        desc_elem = soup.find("div", {"data-test": "job-description"}) or soup.find(
-            "div", class_="job-description"
-        )
-        if desc_elem:
-            details["job_description"] = self._clean_text(desc_elem.get_text())
+        # Check if this is the new SmartRecruiters structure
+        is_new_structure = soup.find("main", class_=lambda x: x and "jobad-main" in x)
 
-        # Requirements
-        req_elem = soup.find("div", {"data-test": "requirements"}) or soup.find(
-            "div", class_="requirements"
-        )
-        if req_elem:
-            details["requirements"] = self._clean_text(req_elem.get_text())
+        if is_new_structure:
+            # New SmartRecruiters structure
+            # Extract company from meta tags
+            company_meta = soup.find("meta", property="og:site_name")
+            if company_meta:
+                details["company"] = company_meta.get("content", "")
 
-        # Location
-        location_elem = soup.find("div", {"data-test": "location"}) or soup.find(
-            "span", class_="location"
-        )
-        if location_elem:
-            details["location"] = self._clean_text(location_elem.get_text())
+            # Fallback: extract company from hiringOrganization meta
+            if not details["company"]:
+                company_meta = soup.find("meta", itemprop="name")
+                if company_meta:
+                    details["company"] = company_meta.get("content", "")
 
-        # Company
-        company_elem = soup.find("div", {"data-test": "company-name"}) or soup.find(
-            "span", class_="company"
-        )
-        if company_elem:
-            details["company"] = self._clean_text(company_elem.get_text())
+            # Extract location from spl-job-location element
+            location_elem = soup.find("spl-job-location")
+            if location_elem:
+                details["location"] = location_elem.get("formattedaddress", "")
 
-        # Salary
-        salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
-        for keyword in salary_keywords:
-            element = soup.find(
-                text=lambda text: text and keyword.lower() in text.lower()
+            # Fallback: extract location from jobLocation meta
+            if not details["location"]:
+                locality = soup.find("meta", itemprop="addressLocality")
+                region = soup.find("meta", itemprop="addressRegion")
+                if locality and region:
+                    details["location"] = (
+                        f"{locality.get('content')}, {region.get('content')}"
+                    )
+
+            # Extract job description from job sections
+            job_sections = soup.find_all("section", class_="job-section")
+            for section in job_sections:
+                section_id = section.get("id", "")
+                title_elem = section.find("h2", class_="title")
+                title_text = title_elem.get_text().lower() if title_elem else ""
+
+                # Get the wysiwyg content
+                wysiwyg = section.find("div", class_="wysiwyg")
+                if wysiwyg:
+                    content = self._clean_text(wysiwyg.get_text())
+
+                    # Categorize based on section ID or title
+                    if (
+                        "jobDescription" in section_id
+                        or "job description" in title_text
+                    ):
+                        details["job_description"] = content
+                    elif (
+                        "qualifications" in section_id or "qualifications" in title_text
+                    ):
+                        details["requirements"] = content
+                    elif (
+                        "additionalInformation" in section_id
+                        or "additional information" in title_text
+                    ):
+                        # Additional information might contain benefits
+                        if (
+                            "benefit" in content.lower()
+                            or "compensation" in content.lower()
+                        ):
+                            details["benefits"] = content
+
+            # Extract salary - look for pay range patterns
+            salary_patterns = [
+                r"pay range for this role is \$[\d,]+ to \$[\d,]+",
+                r"salary range is \$[\d,]+ to \$[\d,]+",
+                r"\$[\d,]+ to \$[\d,]+",
+            ]
+            page_text = soup.get_text()
+            for pattern in salary_patterns:
+                match = re.search(pattern, page_text, re.IGNORECASE)
+                if match:
+                    details["salary"] = match.group(0)
+                    break
+
+        else:
+            # Legacy SmartRecruiters structure with data attributes
+            # Job description
+            desc_elem = soup.find("div", {"data-test": "job-description"}) or soup.find(
+                "div", class_="job-description"
             )
-            if element:
-                parent = element.parent
-                if parent:
-                    text = self._clean_text(parent.get_text())
-                    if "$" in text or any(c.isdigit() for c in text):
-                        details["salary"] = text
-                        break
+            if desc_elem:
+                details["job_description"] = self._clean_text(desc_elem.get_text())
+
+            # Requirements
+            req_elem = soup.find("div", {"data-test": "requirements"}) or soup.find(
+                "div", class_="requirements"
+            )
+            if req_elem:
+                details["requirements"] = self._clean_text(req_elem.get_text())
+
+            # Location
+            location_elem = soup.find("div", {"data-test": "location"}) or soup.find(
+                "span", class_="location"
+            )
+            if location_elem:
+                details["location"] = self._clean_text(location_elem.get_text())
+
+            # Company
+            company_elem = soup.find("div", {"data-test": "company-name"}) or soup.find(
+                "span", class_="company"
+            )
+            if company_elem:
+                details["company"] = self._clean_text(company_elem.get_text())
+
+            # Salary
+            salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
+            for keyword in salary_keywords:
+                element = soup.find(
+                    text=lambda text: text and keyword.lower() in text.lower()
+                )
+                if element:
+                    parent = element.parent
+                    if parent:
+                        text = self._clean_text(parent.get_text())
+                        if "$" in text or any(c.isdigit() for c in text):
+                            details["salary"] = text
+                            break
 
         return details
 

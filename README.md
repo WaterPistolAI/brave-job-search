@@ -45,7 +45,7 @@ BRAVE_MONTHLY_LIMIT=2000
 BRAVE_USAGE_FILE=api_usage.json
 
 # ATS Domains to target
-BRAVE_ATS_DOMAINS='["jobs.ashbyhq.com", "boards.greenhouse.io", "jobs.lever.co", "jobs.smartrecruiters.com", "jobs.workable.com"]'
+BRAVE_ATS_DOMAINS='["boards.greenhouse.io", "jobs.lever.co", "jobs.smartrecruiters.com", "jobs.workable.com"]'
 
 # Search Queries (Boolean logic supported)
 BRAVE_TARGET_QUERIES='["(\"GenAI\" | \"Generative AI\" | \"LLM\") (Engineer | Developer)", "(\"Developer Advocacy\" | \"Developer Relations\" | \"DevRel\")"]'
