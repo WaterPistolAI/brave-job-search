@@ -879,6 +879,10 @@ Make the queries specific and targeted, focusing on the candidate's unique combi
 
             llm_response = response.choices[0].message.content
 
+            # Check if response is valid
+            if not llm_response:
+                return "Error: LLM returned empty response. Please try again.", None
+
             # Extract search queries from LLM response
             search_queries = []
             lines = llm_response.split("\n")
