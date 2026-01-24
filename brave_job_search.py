@@ -150,6 +150,7 @@ def main():
                             "title": res.get("title"),
                             "url": res.get("url"),
                             "snippet": snippet,
+                            "source_adapter": "brave",
                         }
                     )
 

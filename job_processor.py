@@ -72,6 +72,7 @@ class JobDatabase:
                 title TEXT,
                 snippet TEXT,
                 status TEXT DEFAULT 'pending',
+                source_adapter TEXT DEFAULT 'unknown',
                 verified_at TIMESTAMP,
                 scraped_at TIMESTAMP,
                 job_description TEXT,
@@ -117,15 +118,22 @@ class JobDatabase:
         try:
             cursor.execute(
                 """
-                INSERT OR IGNORE INTO jobs (url, title, snippet)
-                VALUES (?, ?, ?)
+                INSERT OR IGNORE INTO jobs (url, title, snippet, source_adapter)
+                VALUES (?, ?, ?, ?)
             """,
-                (job_data["url"], job_data["title"], job_data["snippet"]),
+                (
+                    job_data["url"],
+                    job_data["title"],
+                    job_data["snippet"],
+                    job_data.get("source_adapter", "unknown"),
+                ),
             )
             self.conn.commit()
             job_id = cursor.lastrowid
             if job_id:
-                logging.info(f"Inserted job: {job_data['title']} (ID: {job_id})")
+                logging.info(
+                    f"Inserted job: {job_data['title']} from {job_data.get('source_adapter', 'unknown')} (ID: {job_id})"
+                )
             return job_id
         except sqlite3.Error as e:
             logging.error(f"Error inserting job: {e}")

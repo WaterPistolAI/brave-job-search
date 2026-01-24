@@ -119,6 +119,7 @@ class GoogleSearchAPI:
                             "title": item.get("title", ""),
                             "url": item.get("link", ""),
                             "snippet": item.get("snippet", ""),
+                            "source_adapter": "google",
                         }
                     )
 
