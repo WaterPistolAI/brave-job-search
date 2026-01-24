@@ -1050,6 +1050,7 @@ def generate_cover_letter_and_analyze(job_id):
     """
     Generate a personalized cover letter for a specific job and analyze
     pros/cons of the candidate's materials compared to the job.
+    Returns status, cover_letter, analysis, and job_dict for chat integration.
     """
     try:
         # Get job details from database
@@ -1064,7 +1065,7 @@ def generate_cover_letter_and_analyze(job_id):
         conn.close()
 
         if not job:
-            return "Error: Job not found", None, None
+            return "Error: Job not found", None, None, None
 
         job_dict = dict(job)
 
@@ -1076,6 +1077,7 @@ def generate_cover_letter_and_analyze(job_id):
         if not user_docs or not user_docs["documents"]:
             return (
                 "Error: No resume or cover letter found. Please upload your documents first.",
+                None,
                 None,
                 None,
             )
@@ -1095,6 +1097,7 @@ def generate_cover_letter_and_analyze(job_id):
                 "Error: No resume found. Please upload your resume first.",
                 None,
                 None,
+                None,
             )
 
         # Use LLM to generate cover letter and analyze pros/cons
@@ -1109,6 +1112,7 @@ def generate_cover_letter_and_analyze(job_id):
             if not openai_api_key:
                 return (
                     "Error: OpenAI API key not found. Please set OPENAI_API_KEY in your .env file.",
+                    None,
                     None,
                     None,
                 )
@@ -1220,15 +1224,16 @@ Please provide your response in the following format:
                 f"✅ Successfully generated cover letter and analysis for {job_dict['title']} at {job_dict['company']}",
                 cover_letter,
                 analysis,
+                job_dict,
             )
 
         except Exception as e:
             logging.error(f"Error calling LLM: {e}")
-            return f"Error generating cover letter: {str(e)}", None, None
+            return f"Error generating cover letter: {str(e)}", None, None, None
 
     except Exception as e:
         logging.error(f"Error in cover letter generation: {e}")
-        return f"Error: {str(e)}", None, None
+        return f"Error: {str(e)}", None, None, None
 
 
 # Global artifact storage
@@ -1239,6 +1244,12 @@ artifact_storage = {
 
 # Global state for chat greeting
 chat_greeting_state = {"greeting": None}
+
+# Global conversation history storage indexed by resume ID
+conversation_history_storage = {
+    "current_resume_id": None,
+    "histories": {},  # resume_id -> list of (user_message, assistant_message)
+}
 
 
 def resume_chat(message, history):
@@ -2068,6 +2079,175 @@ with gr.Blocks(title="Job Search Manager") as demo:
                     generated_cover_letter,
                     pros_cons_analysis,
                 ],
+            )
+
+        # AI Job Matching Tab
+        with gr.Tab("🎯 AI Job Matching"):
+            with gr.Row():
+                gr.Markdown("### AI-Powered Job Matching & Cover Letter Generation")
+
+            with gr.Row():
+                gr.Markdown(
+                    "Select a job from the ranked matches to generate a personalized cover letter and analysis. "
+                    "The pros/cons analysis and cover letter will appear as messages in the chat window."
+                )
+
+            gr.Markdown("---")
+
+            with gr.Row():
+                with gr.Column(scale=1):
+                    gr.Markdown("<center><h2>📊 Job Matching</h2></center>")
+
+                    with gr.Row():
+                        n_jobs = gr.Slider(
+                            minimum=5,
+                            maximum=50,
+                            value=10,
+                            step=5,
+                            label="Number of Jobs to Return",
+                        )
+                        match_jobs_btn = gr.Button(
+                            "🎯 Find Matching Jobs", variant="primary", size="lg"
+                        )
+
+                    with gr.Row():
+                        match_status = gr.Textbox(
+                            label="Status", interactive=False, lines=5
+                        )
+
+                    with gr.Row():
+                        match_results = gr.Dataframe(
+                            label="Ranked Job Matches", interactive=False
+                        )
+
+                    with gr.Row():
+                        gr.Markdown("### Generate Cover Letter")
+
+                    with gr.Row():
+                        gr.Markdown(
+                            "Select a job ID from the table above and click Generate to create a personalized cover letter and analysis."
+                        )
+
+                    with gr.Row():
+                        selected_job_id = gr.Number(
+                            label="Selected Job ID",
+                            precision=0,
+                            placeholder="Enter job ID from table",
+                        )
+                        generate_cover_letter_btn = gr.Button(
+                            "📝 Generate Cover Letter & Analysis", variant="primary"
+                        )
+
+                with gr.Column(scale=2):
+                    gr.Markdown("<center><h2>💬 Chat with AI Coach</h2></center>")
+
+                    # Chat history display
+                    job_chat_history = gr.Chatbot(
+                        label="Conversation",
+                        height=600,
+                    )
+
+                    # Chat input
+                    with gr.Row():
+                        job_chat_input = gr.Textbox(
+                            label="Your Message",
+                            placeholder="Type your message here...",
+                            scale=4,
+                            show_label=False,
+                        )
+                        job_send_btn = gr.Button("Send", variant="primary", scale=1)
+
+                    # Hidden state for chat history
+                    job_chat_state = gr.State([])
+
+            gr.Markdown("---")
+
+            with gr.Row():
+                gr.Markdown("### Tips")
+
+            with gr.Row():
+                gr.Markdown(
+                    """
+                - **Find Matching Jobs**: Click to analyze your resume and find the most relevant jobs
+                - **Select Job**: Choose a job ID from the ranked matches table
+                - **Generate Cover Letter**: Click to create a personalized cover letter and pros/cons analysis
+                - **Chat**: The pros/cons analysis and cover letter will appear as messages in the chat
+                - **Continue Conversation**: Ask follow-up questions about the job, cover letter, or application strategy
+                - Conversation history is saved per job ID for easy reference
+                - Requires OpenAI API key (OPENAI_API_KEY) and uploaded resume
+                """
+                )
+
+            # Event handlers
+            def generate_cover_letter_for_chat(job_id):
+                """Generate cover letter and add to chat history."""
+                if not job_id:
+                    return "Error: Please enter a job ID", None, None, None
+
+                # Generate cover letter and analysis
+                status, cover_letter, analysis, job_dict = generate_cover_letter_and_analyze(
+                    job_id
+                )
+
+                if not cover_letter or not analysis:
+                    return status, None, None, None
+
+                # Create chat history with pros/cons first, then cover letter
+                chat_history = [
+                    (None, f"## 📋 Analysis for Job #{job_id}\n\n{job_dict['title']} at {job_dict['company']}\n\n{analysis}"),
+                    (None, f"## 📄 Personalized Cover Letter\n\n{cover_letter}"),
+                ]
+
+                # Save conversation history indexed by job ID
+                conversation_history_storage["current_resume_id"] = job_id
+                conversation_history_storage["histories"][job_id] = chat_history
+
+                return status, chat_history, chat_history, job_dict
+
+            match_jobs_btn.click(
+                analyze_resume_and_rank_jobs,
+                inputs=[n_jobs],
+                outputs=[match_status, match_results],
+            )
+
+            generate_cover_letter_btn.click(
+                generate_cover_letter_for_chat,
+                inputs=[selected_job_id],
+                outputs=[
+                    match_status,
+                    job_chat_history,
+                    job_chat_state,
+                    gr.State(),  # job_dict placeholder
+                ],
+            )
+
+            def send_job_message(message, history):
+                """Send a message and get AI response in job context."""
+                if not message or not message.strip():
+                    return history, history
+
+                # Add user message to history
+                history.append((message, None))
+
+                # Get AI response
+                response, artifact = resume_chat(message, history)
+
+                # Add AI response to history
+                history[-1] = (message, response)
+
+                return history, history
+
+            # Wire up send button and chat input
+            job_send_btn.click(
+                send_job_message,
+                inputs=[job_chat_input, job_chat_state],
+                outputs=[job_chat_history, job_chat_state],
+            )
+
+            job_chat_input.submit(
+                send_job_message,
+                inputs=[job_chat_input, job_chat_state],
+                outputs=[job_chat_history, job_chat_state],
             )
 
         # AI Resume Coach Tab
