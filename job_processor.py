@@ -12,12 +12,10 @@ from dotenv import load_dotenv
 from scraping_adapters import adapter_registry
 from embedding_adapters import get_embedding_adapter
 from ats_domains import get_expired_indicators, get_domain_config
-from pathos.multiprocessing import ProcessingPool as Pool
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 import json
-from pyrate_limiter import Duration, Rate, limiter_factory, MultiprocessBucket
-from pyrate_limiter.extras.httpx_limiter import RateLimiterTransport
-from queue import Queue
+import threading
 
 load_dotenv()
 
@@ -271,21 +269,13 @@ class JobDatabase:
 
 
 class RateLimiter:
-    """Rate limiter for per-domain request limiting using pyrate_limiter."""
+    """Simple time-based rate limiter for per-domain request limiting."""
 
     def __init__(self, requests_per_minute: int):
         self.requests_per_minute = requests_per_minute
-        # Create rate: X requests per minute
-        self.rate = Rate(requests_per_minute, Duration.MINUTE)
-        # Create in-memory bucket
-        self.bucket = limiter_factory.create_inmemory_limiter(
-            rate_per_duration=requests_per_minute, duration=Duration.MINUTE
-        )
-        # Create httpx transport with rate limiting
-        self.transport = RateLimiterTransport(limiter=self.bucket)
-        # Create httpx client with rate-limited transport
+        self.min_interval = 60.0 / requests_per_minute  # seconds between requests
+        self.last_request_time = 0
         self.client = httpx.Client(
-            transport=self.transport,
             timeout=REQUEST_TIMEOUT,
             follow_redirects=True,
             headers={
@@ -298,6 +288,17 @@ class RateLimiter:
         Make an HTTP request with rate limiting.
         Returns (status_code, html_content).
         """
+        # Rate limiting: wait if needed
+        current_time = time.time()
+        time_since_last = current_time - self.last_request_time
+
+        if time_since_last < self.min_interval:
+            sleep_time = self.min_interval - time_since_last
+            time.sleep(sleep_time)
+
+        self.last_request_time = time.time()
+
+        # Make the request
         response = self.client.get(url)
         return response.status_code, response.text
 
@@ -496,14 +497,17 @@ def scrape_job_with_markdown(url: str, html_content: str) -> Dict:
         return details
 
 
-def process_domain_jobs(
-    domain: str, jobs: List[Dict], rate_limiter: RateLimiter, result_queue: Queue
-):
+def process_domain_jobs(args: Tuple[str, List[Dict], int]) -> Tuple[str, List[Dict]]:
     """
     Process jobs for a specific domain with rate limiting.
-    Results are put into the result queue.
+    Args: (domain, jobs, rate_limit)
+    Returns (domain, results) tuple.
     """
+    domain, jobs, rate_limit = args
     logging.info(f"Processing {len(jobs)} jobs for domain: {domain}")
+
+    # Create RateLimiter inside this process
+    rate_limiter = RateLimiter(rate_limit)
 
     results = []
     for job in jobs:
@@ -543,14 +547,17 @@ def process_domain_jobs(
                 }
             )
 
-    result_queue.put((domain, results))
+    # Close the rate limiter client
+    rate_limiter.close()
+
+    return (domain, results)
 
 
 def process_jobs_multiprocess(
     jobs: List[Dict], rate_limit: int = GLOBAL_RATE_LIMIT
 ) -> List[Dict]:
     """
-    Process jobs using multiprocessing with per-domain rate limiting.
+    Process jobs using threading with per-domain rate limiting.
     """
     # Group jobs by domain
     domain_jobs = {}
@@ -563,34 +570,28 @@ def process_jobs_multiprocess(
 
     logging.info(f"Processing {len(jobs)} jobs across {len(domain_jobs)} domains")
 
-    # Create a queue for results
-    result_queue = Queue()
-
-    # Create multiprocess bucket for rate limiting across processes
-    rate = Rate(rate_limit, Duration.MINUTE)
-    bucket = MultiprocessBucket.init([rate])
-
-    # Create a thread for each domain using ThreadPool
-    with Pool(
-        processes=len(domain_jobs),
-        initializer=limiter_factory.init_global_limiter,
-        initargs=(bucket,),
-    ) as pool:
-        # Submit tasks for each domain
-        pool.starmap(
-            process_domain_jobs,
-            [
-                (domain, domain_job_list, RateLimiter(rate_limit), result_queue)
-                for domain, domain_job_list in domain_jobs.items()
-            ],
-        )
-
-    # Collect results from queue
+    # Use ThreadPoolExecutor to process each domain in a separate thread
     all_results = []
-    while not result_queue.empty():
-        domain, results = result_queue.get()
-        all_results.extend(results)
-        logging.info(f"Collected {len(results)} results from domain: {domain}")
+    with ThreadPoolExecutor(max_workers=len(domain_jobs)) as executor:
+        # Submit tasks for each domain
+        future_to_domain = {
+            executor.submit(
+                process_domain_jobs, (domain, domain_job_list, rate_limit)
+            ): domain
+            for domain, domain_job_list in domain_jobs.items()
+        }
+
+        # Collect results as they complete
+        for future in as_completed(future_to_domain):
+            domain = future_to_domain[future]
+            try:
+                domain, domain_results = future.result()
+                all_results.extend(domain_results)
+                logging.info(
+                    f"Collected {len(domain_results)} results from domain: {domain}"
+                )
+            except Exception as e:
+                logging.error(f"Error processing domain {domain}: {e}")
 
     return all_results
 
