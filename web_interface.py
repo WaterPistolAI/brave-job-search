@@ -701,18 +701,26 @@ def embed_user_document(document_type, file_path):
         # Use a consistent ID for each document type (resume or cover_letter)
         doc_id = f"{document_type}_current"
 
-        # Check if a document of this type already exists and delete it
+        # Delete ALL documents with this document_type to ensure clean overwrite
         try:
-            existing_docs = collection.get(ids=[doc_id])
-            if existing_docs and existing_docs["ids"]:
-                collection.delete(ids=[doc_id])
-                logging.info(f"Deleted previous {document_type} document")
-        except Exception as e:
-            logging.warning(
-                f"Error checking for existing {document_type} document: {e}"
-            )
+            # Get all documents with this document_type
+            all_docs = collection.get()
+            if all_docs and all_docs["metadatas"]:
+                # Find all IDs with matching document_type
+                ids_to_delete = []
+                for i, metadata in enumerate(all_docs["metadatas"]):
+                    if metadata.get("document_type") == document_type:
+                        ids_to_delete.append(all_docs["ids"][i])
 
-        # Store in ChromaDB
+                if ids_to_delete:
+                    collection.delete(ids=ids_to_delete)
+                    logging.info(
+                        f"Deleted {len(ids_to_delete)} existing {document_type} document(s)"
+                    )
+        except Exception as e:
+            logging.warning(f"Error deleting existing documents: {e}")
+
+        # Add the new document
         collection.add(
             embeddings=[embedding],
             documents=[text],
