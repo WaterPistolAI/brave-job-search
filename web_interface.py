@@ -59,6 +59,16 @@ def initialize_database():
     """
     )
 
+    # Add source_adapter column if it doesn't exist (for backward compatibility)
+    try:
+        cursor.execute(
+            "ALTER TABLE jobs ADD COLUMN source_adapter TEXT DEFAULT 'unknown'"
+        )
+        logging.info("Added source_adapter column to jobs table")
+    except sqlite3.OperationalError:
+        # Column already exists, which is fine
+        pass
+
     # Processing log table
     cursor.execute(
         """

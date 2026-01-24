@@ -72,7 +72,6 @@ class JobDatabase:
                 title TEXT,
                 snippet TEXT,
                 status TEXT DEFAULT 'pending',
-                source_adapter TEXT DEFAULT 'unknown',
                 verified_at TIMESTAMP,
                 scraped_at TIMESTAMP,
                 job_description TEXT,
@@ -86,6 +85,16 @@ class JobDatabase:
             )
         """
         )
+
+        # Add source_adapter column if it doesn't exist (for backward compatibility)
+        try:
+            cursor.execute(
+                "ALTER TABLE jobs ADD COLUMN source_adapter TEXT DEFAULT 'unknown'"
+            )
+            logging.info("Added source_adapter column to jobs table")
+        except sqlite3.OperationalError:
+            # Column already exists, which is fine
+            pass
 
         # Processing log table
         cursor.execute(
