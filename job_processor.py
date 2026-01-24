@@ -430,8 +430,10 @@ def convert_html_to_markdown(html_content: str) -> str:
 
         md = MarkItDown()
 
-        # Save HTML content to a temporary file
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
+        # Save HTML content to a temporary file with UTF-8 encoding
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".html", delete=False, encoding="utf-8"
+        ) as f:
             f.write(html_content)
             temp_file_path = f.name
 
