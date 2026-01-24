@@ -94,14 +94,14 @@ SUPPORTED_ATS_DOMAINS = {
             },
         ],
     },
-    "www.levels.fyi": {
+    "www.levels.fyi/jobs": {
         "name": "Levels.fyi",
-        "description": "Levels.fyi Job Board",
+        "description": "Levels.fyi Job Board (jobs endpoint only)",
         "scraping_adapter": "LevelsFYIAdapter",
         "expired_selectors": [
             {
-                "selector": "body div#__next div div div div section section div h1",
-                "text": "oops! this job has expired",
+                "selector": "section.job-details-module-scss-module__wKuTxW__errorContainer h1",
+                "text": "Oops! This job has expired",
                 "case_sensitive": False,
             },
         ],

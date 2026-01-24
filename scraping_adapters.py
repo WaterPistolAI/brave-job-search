@@ -987,56 +987,118 @@ class LevelsFYIAdapter(BaseScraperAdapter):
             "salary": "",
         }
 
-        # Levels.fyi has a specific structure
-        # Job description
-        desc_elem = soup.find("div", class_="job-description") or soup.find(
-            "div", {"data-testid": "job-description"}
-        )
-        if desc_elem:
-            details["job_description"] = self._clean_text(desc_elem.get_text())
+        # Levels.fyi job pages have a specific structure
+        # Check if this is a job page (has jobId parameter)
+        is_job_page = "jobId" in url or "/jobs" in url
 
-        # Requirements
-        req_elem = soup.find("div", class_="requirements") or soup.find(
-            "div", {"data-testid": "requirements"}
-        )
-        if req_elem:
-            details["requirements"] = self._clean_text(req_elem.get_text())
+        if is_job_page:
+            # Extract company name and location from the details row
+            # Format: "Hightouch · 2 months ago · San Francisco, California, United States · Fully Remote"
+            details_row = soup.find("p", class_=lambda x: x and "detailsRow" in x)
+            if details_row:
+                text = self._clean_text(details_row.get_text())
+                # Split by "·" to get parts
+                parts = [p.strip() for p in text.split("·")]
+                if len(parts) >= 3:
+                    # First part is company name
+                    details["company"] = parts[0]
+                    # Third part is location (might include remote info)
+                    if len(parts) >= 3:
+                        location_part = parts[2]
+                        # Remove "Fully Remote" if present
+                        details["location"] = location_part.replace(
+                            "Fully Remote", ""
+                        ).strip()
 
-        # Location
-        location_elem = soup.find("div", class_="location") or soup.find(
-            "span", class_="location"
-        )
-        if location_elem:
-            details["location"] = self._clean_text(location_elem.get_text())
+            # Extract salary from compensation row
+            compensation_row = soup.find(
+                "div", class_=lambda x: x and "compensationRow" in x
+            )
+            if compensation_row:
+                # Get the text and remove the "(base salary from job description)" part
+                salary_text = self._clean_text(compensation_row.get_text())
+                # Remove the parenthetical note
+                salary_text = re.sub(r"\(.*?\)", "", salary_text).strip()
+                if salary_text and (
+                    "$" in salary_text or any(c.isdigit() for c in salary_text)
+                ):
+                    details["salary"] = salary_text
 
-        # Company
-        company_elem = soup.find("div", class_="company-name") or soup.find(
-            "span", class_="company"
-        )
-        if company_elem:
-            details["company"] = self._clean_text(company_elem.get_text())
+            # Extract job description from the about section
+            # Look for the job-details-about section
+            about_section = soup.find(
+                "section", class_=lambda x: x and "aboutContainer" in x
+            )
+            if about_section:
+                # Get the markdown text container
+                markdown_text = about_section.find(
+                    "div", class_=lambda x: x and "markdownText" in x
+                )
+                if markdown_text:
+                    details["job_description"] = self._clean_text(
+                        markdown_text.get_text()
+                    )
 
-        # Salary - Levels.fyi often has salary information prominently
-        salary_elem = soup.find("div", class_="salary") or soup.find(
-            "div", {"data-testid": "salary"}
-        )
-        if salary_elem:
-            details["salary"] = self._clean_text(salary_elem.get_text())
+            # If no description found in about section, try other selectors
+            if not details["job_description"]:
+                desc_selectors = [
+                    'div[class*="job-description"]',
+                    'div[data-testid="job-description"]',
+                    'div[class*="description"]',
+                    'section[class*="description"]',
+                    'div[class*="job-details"]',
+                ]
 
-        # If no salary element found, try to find it in the text
-        if not details["salary"]:
-            salary_keywords = ["salary", "compensation", "pay", "hourly", "annual", "$"]
-            for keyword in salary_keywords:
+                for selector in desc_selectors:
+                    desc_elem = soup.select_one(selector)
+                    if desc_elem:
+                        details["job_description"] = self._clean_text(
+                            desc_elem.get_text()
+                        )
+                        break
+
+            # If still no description, try to get the largest text block
+            if not details["job_description"]:
+                text_blocks = soup.find_all(["div", "section", "article"])
+                if text_blocks:
+                    # Filter out very short blocks and navigation elements
+                    valid_blocks = [
+                        b
+                        for b in text_blocks
+                        if len(b.get_text()) > 100
+                        and "nav" not in str(b.get("class", ""))
+                    ]
+                    if valid_blocks:
+                        largest_block = max(
+                            valid_blocks, key=lambda x: len(x.get_text())
+                        )
+                        details["job_description"] = self._clean_text(
+                            largest_block.get_text()
+                        )
+
+            # Extract requirements - look for section with requirements/qualifications
+            req_keywords = ["requirement", "qualification", "skill", "what you need"]
+            for keyword in req_keywords:
                 element = soup.find(
                     text=lambda text: text and keyword.lower() in text.lower()
                 )
                 if element:
                     parent = element.parent
                     if parent:
-                        text = self._clean_text(parent.get_text())
-                        if "$" in text or any(c.isdigit() for c in text):
-                            details["salary"] = text
-                            break
+                        details["requirements"] = self._clean_text(parent.get_text())
+                        break
+
+            # Extract benefits - look for section with benefits/perks
+            benefit_keywords = ["benefit", "perk", "what we offer", "compensation"]
+            for keyword in benefit_keywords:
+                element = soup.find(
+                    text=lambda text: text and keyword.lower() in text.lower()
+                )
+                if element:
+                    parent = element.parent
+                    if parent:
+                        details["benefits"] = self._clean_text(parent.get_text())
+                        break
 
         return details
 
