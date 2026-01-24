@@ -425,10 +425,25 @@ def convert_html_to_markdown(html_content: str) -> str:
     """Convert HTML content to markdown using markitdown."""
     try:
         from markitdown import MarkItDown
+        import tempfile
+        import os
 
         md = MarkItDown()
-        result = md.convert(html_content)
-        return result.text_content
+
+        # Save HTML content to a temporary file
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
+            f.write(html_content)
+            temp_file_path = f.name
+
+        try:
+            # Convert the temporary file
+            result = md.convert(temp_file_path)
+            return result.text_content
+        finally:
+            # Clean up the temporary file
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+
     except ImportError:
         logging.warning("markitdown not available, using BeautifulSoup text extraction")
         soup = BeautifulSoup(html_content, "html.parser")
