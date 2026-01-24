@@ -11,11 +11,15 @@ import pandas as pd
 import sys
 import threading
 import queue
+import time
+from datetime import datetime
 from dotenv import load_dotenv
 from job_processor import JobEmbedder, process_jobs_from_json
 import logging
 import brave_job_search
 from ats_domains import SUPPORTED_ATS_DOMAINS
+from pathlib import Path
+import tempfile
 
 load_dotenv()
 
@@ -640,6 +644,134 @@ def cancel_job_processor():
             return "ℹ️ No job processor is currently running."
 
 
+def extract_text_from_file(file_path):
+    """Extract text from a file (txt, rst, or pdf)."""
+    file_path = Path(file_path)
+    file_ext = file_path.suffix.lower()
+
+    try:
+        if file_ext == ".txt":
+            with open(file_path, "r", encoding="utf-8") as f:
+                return f.read()
+        elif file_ext == ".rst":
+            with open(file_path, "r", encoding="utf-8") as f:
+                return f.read()
+        elif file_ext == ".pdf":
+            try:
+                import PyPDF2
+
+                with open(file_path, "rb") as f:
+                    reader = PyPDF2.PdfReader(f)
+                    text = ""
+                    for page in reader.pages:
+                        text += page.extract_text() + "\n"
+                    return text
+            except ImportError:
+                logging.error("PyPDF2 not installed. Install with: pip install PyPDF2")
+                return None
+        else:
+            logging.error(f"Unsupported file format: {file_ext}")
+            return None
+    except Exception as e:
+        logging.error(f"Error extracting text from {file_path}: {e}")
+        return None
+
+
+def embed_user_document(document_type, file_path):
+    """Embed a user document (resume or cover letter) in ChromaDB."""
+    if not file_path:
+        return "Error: No file provided", None
+
+    # Extract text from file
+    text = extract_text_from_file(file_path)
+    if not text:
+        return "Error: Failed to extract text from file", None
+
+    try:
+        # Initialize embedder
+        embedder = JobEmbedder()
+
+        # Generate embedding
+        embedding = embedder.embedding_adapter.embed([text])[0]
+
+        # Store in ChromaDB with a separate collection for user documents
+        collection_name = "user_documents"
+        collection = embedder.client.get_or_create_collection(
+            name=collection_name, metadata={"hnsw:space": "cosine"}
+        )
+
+        # Generate a unique ID for the document
+        doc_id = f"{document_type}_{int(time.time())}"
+
+        # Store in ChromaDB
+        collection.add(
+            embeddings=[embedding],
+            documents=[text],
+            metadatas=[
+                {
+                    "document_type": document_type,
+                    "file_name": Path(file_path).name,
+                    "uploaded_at": datetime.now().isoformat(),
+                }
+            ],
+            ids=[doc_id],
+        )
+
+        logging.info(f"Successfully embedded {document_type} document")
+        return f"✅ Successfully embedded {document_type} document", text
+    except Exception as e:
+        logging.error(f"Error embedding {document_type} document: {e}")
+        return f"❌ Error: {str(e)}", None
+
+
+def search_user_documents(query, n_results=5):
+    """Search user documents (resume/cover letter) for relevant content."""
+    if not query or not query.strip():
+        return "Error: Query is required", None
+
+    try:
+        embedder = JobEmbedder()
+
+        # Get the user documents collection
+        collection = embedder.client.get_collection(name="user_documents")
+
+        # Generate query embedding
+        query_embedding = embedder.embedding_adapter.embed([query])[0]
+
+        # Search in ChromaDB
+        results = collection.query(
+            query_embeddings=[query_embedding], n_results=n_results
+        )
+
+        if not results["documents"] or not results["documents"][0]:
+            return "No documents found", None
+
+        # Format results
+        documents = []
+        for i in range(len(results["documents"][0])):
+            documents.append(
+                {
+                    "document_type": results["metadatas"][0][i]["document_type"],
+                    "file_name": results["metadatas"][0][i]["file_name"],
+                    "uploaded_at": results["metadatas"][0][i]["uploaded_at"],
+                    "content": (
+                        results["documents"][0][i][:500] + "..."
+                        if len(results["documents"][0][i]) > 500
+                        else results["documents"][0][i]
+                    ),
+                }
+            )
+
+        df = pd.DataFrame(documents)
+        logging.info(
+            f"User document search: '{query}' returned {len(documents)} results"
+        )
+        return f"Found {len(documents)} relevant document sections", df
+    except Exception as e:
+        logging.error(f"Error searching user documents: {e}")
+        return f"Error: {str(e)}", None
+
+
 # Initialize database on module import
 initialize_database()
 
@@ -963,6 +1095,118 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 export_df = gr.Dataframe(label="Exported Jobs", interactive=False)
 
             export_btn.click(export_jobs, outputs=export_df)
+
+        # Documents Tab
+        with gr.Tab("📄 Documents"):
+            with gr.Row():
+                gr.Markdown("### Upload Your Documents")
+
+            with gr.Row():
+                gr.Markdown(
+                    "Upload your resume and cover letter to enable semantic search against your qualifications. "
+                    "Supported formats: **.txt**, **.rst**, **.pdf**"
+                )
+
+            gr.Markdown("---")
+
+            with gr.Row():
+                gr.Markdown("### Resume")
+
+            with gr.Row():
+                resume_upload = gr.File(
+                    label="Upload Resume",
+                    file_types=[".txt", ".rst", ".pdf"],
+                    file_count="single",
+                )
+                embed_resume_btn = gr.Button("Embed Resume", variant="primary")
+
+            with gr.Row():
+                resume_status = gr.Textbox(label="Status", interactive=False)
+                resume_preview = gr.Textbox(
+                    label="Resume Preview (first 500 chars)",
+                    interactive=False,
+                    lines=10,
+                )
+
+            gr.Markdown("---")
+
+            with gr.Row():
+                gr.Markdown("### Cover Letter")
+
+            with gr.Row():
+                cover_letter_upload = gr.File(
+                    label="Upload Cover Letter",
+                    file_types=[".txt", ".rst", ".pdf"],
+                    file_count="single",
+                )
+                embed_cover_letter_btn = gr.Button("Embed Cover Letter", variant="primary")
+
+            with gr.Row():
+                cover_letter_status = gr.Textbox(label="Status", interactive=False)
+                cover_letter_preview = gr.Textbox(
+                    label="Cover Letter Preview (first 500 chars)",
+                    interactive=False,
+                    lines=10,
+                )
+
+            gr.Markdown("---")
+
+            with gr.Row():
+                gr.Markdown("### Search Your Documents")
+
+            with gr.Row():
+                doc_search_input = gr.Textbox(
+                    label="Search Query",
+                    placeholder="e.g., What are my Python skills?",
+                    scale=4,
+                )
+                doc_n_results = gr.Slider(
+                    minimum=1, maximum=10, value=5, step=1, label="Number of Results"
+                )
+                doc_search_btn = gr.Button("Search Documents", variant="primary", scale=1)
+
+            with gr.Row():
+                doc_search_status = gr.Textbox(label="Status", interactive=False)
+
+            with gr.Row():
+                doc_search_results = gr.Dataframe(
+                    label="Document Search Results", interactive=False
+                )
+
+            gr.Markdown("---")
+
+            with gr.Row():
+                gr.Markdown("### Tips")
+
+            with gr.Row():
+                gr.Markdown(
+                    """
+                - **Resume**: Upload your resume in .txt, .rst, or .pdf format
+                - **Cover Letter**: Upload your cover letter in .txt, .rst, or .pdf format
+                - **Embed**: Click the embed button to process and store your document in the vector database
+                - **Search**: Use semantic search to find relevant sections in your documents
+                - Documents are stored separately from job listings for easy reference
+                """
+                )
+
+            # Event handlers
+            embed_resume_btn.click(
+                lambda file: embed_user_document("resume", file),
+                inputs=[resume_upload],
+                outputs=[resume_status, resume_preview],
+            )
+
+            embed_cover_letter_btn.click(
+                lambda file: embed_user_document("cover_letter", file),
+                inputs=[cover_letter_upload],
+                outputs=[cover_letter_status, cover_letter_preview],
+            )
+
+            doc_search_btn.click(
+                search_user_documents,
+                inputs=[doc_search_input, doc_n_results],
+                outputs=[doc_search_status, doc_search_results],
+            )
 
         # Run Commands Tab
         with gr.Tab("🚀 Run Commands"):
