@@ -15,6 +15,7 @@ from ats_domains import get_expired_indicators, get_domain_config
 from multiprocessing import Process, Queue, Manager
 from urllib.parse import urlparse
 import json
+from ratelimit import limits, sleep_and_retry
 
 load_dotenv()
 
@@ -268,28 +269,42 @@ class JobDatabase:
 
 
 class RateLimiter:
-    """Rate limiter for per-domain request limiting."""
+    """Rate limiter for per-domain request limiting using ratelimit package."""
 
     def __init__(self, requests_per_minute: int):
         self.requests_per_minute = requests_per_minute
-        self.request_times = []
+        # Calculate the minimum period between requests in seconds
+        self.min_period = 60 / requests_per_minute
+        # Create a rate-limited request function
+        self._rate_limited_request = self._create_rate_limited_request()
 
-    def wait_if_needed(self):
-        """Wait if rate limit would be exceeded."""
-        now = time.time()
-        # Remove requests older than 1 minute
-        self.request_times = [t for t in self.request_times if now - t < 60]
+    def _create_rate_limited_request(self):
+        """Create a rate-limited request function."""
 
-        if len(self.request_times) >= self.requests_per_minute:
-            # Calculate how long to wait
-            oldest_request = min(self.request_times)
-            wait_time = 60 - (now - oldest_request)
-            if wait_time > 0:
-                logging.info(f"Rate limit reached, waiting {wait_time:.2f} seconds")
-                time.sleep(wait_time)
+        @sleep_and_retry
+        @limits(calls=1, period=int(self.min_period))
+        def _request(url: str) -> Tuple[int, str]:
+            """
+            Make an HTTP request with rate limiting.
+            Returns (status_code, html_content).
+            """
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
 
-        # Record this request
-        self.request_times.append(now)
+            response = httpx.get(
+                url, headers=headers, timeout=REQUEST_TIMEOUT, follow_redirects=True
+            )
+
+            return response.status_code, response.text
+
+        return _request
+
+    def make_request(self, url: str) -> Tuple[int, str]:
+        """
+        Make a request with rate limiting.
+        """
+        return self._rate_limited_request(url)
 
 
 def verify_job_with_rate_limit(
@@ -299,26 +314,19 @@ def verify_job_with_rate_limit(
     Verify if a job listing is still active with rate limiting.
     Returns (is_active, message, html_content).
     """
-    rate_limiter.wait_if_needed()
-
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
+        # Make rate-limited request
+        status_code, html_content = rate_limiter.make_request(job["url"])
 
-        response = httpx.get(
-            job["url"], headers=headers, timeout=REQUEST_TIMEOUT, follow_redirects=True
-        )
-
-        if response.status_code == 404:
+        if status_code == 404:
             return False, "Page not found (404)", None
-        elif response.status_code == 410:
+        elif status_code == 410:
             return False, "Page gone (410)", None
-        elif response.status_code >= 400:
-            return False, f"HTTP {response.status_code}", None
+        elif status_code >= 400:
+            return False, f"HTTP {status_code}", None
 
         # Parse HTML content
-        soup = BeautifulSoup(response.text, "html.parser")
+        soup = BeautifulSoup(html_content, "html.parser")
         page_text = soup.get_text().lower()
 
         # Get domain-specific expired indicators
@@ -413,7 +421,7 @@ def verify_job_with_rate_limit(
             return False, "No job posting elements found", None
 
         # Job is active, return HTML content for scraping
-        return True, "Job appears active", response.text
+        return True, "Job appears active", html_content
 
     except httpx.TimeoutException:
         return False, "Request timeout", None
