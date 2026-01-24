@@ -789,6 +789,209 @@ def search_user_documents(query, n_results=5):
         return f"Error: {str(e)}", None
 
 
+def analyze_resume_and_rank_jobs(n_results=10):
+    """
+    Analyze resume and cover letter with LLM, generate search queries,
+    and rank job listings by relevance.
+    """
+    try:
+        embedder = JobEmbedder()
+
+        # Get user documents (resume and cover letter)
+        user_collection = embedder.client.get_collection(name="user_documents")
+        user_docs = user_collection.get()
+
+        if not user_docs or not user_docs["documents"]:
+            return (
+                "Error: No resume or cover letter found. Please upload your documents first.",
+                None,
+            )
+
+        # Extract resume and cover letter text
+        resume_text = ""
+        cover_letter_text = ""
+        for i, metadata in enumerate(user_docs["metadatas"]):
+            doc_type = metadata.get("document_type", "")
+            if doc_type == "resume":
+                resume_text = user_docs["documents"][i]
+            elif doc_type == "cover_letter":
+                cover_letter_text = user_docs["documents"][i]
+
+        if not resume_text:
+            return "Error: No resume found. Please upload your resume first.", None
+
+        # Use LLM to analyze and generate search queries
+        try:
+            from openai import OpenAI
+
+            # Check for OpenAI API key (separate from embedding key)
+            openai_api_key = os.environ.get("OPENAI_API_KEY", "")
+            openai_base_url = os.environ.get("OPENAI_BASE_URL", "")
+            openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+            if not openai_api_key:
+                return (
+                    "Error: OpenAI API key not found. Please set OPENAI_API_KEY in your .env file for LLM-based job matching. "
+                    "Note: This is different from OPENAI_EMBEDDING_API_KEY which is used for embeddings.",
+                    None,
+                )
+
+            client = OpenAI(api_key=openai_api_key, base_url=openai_base_url)
+
+            # Create prompt for LLM
+            prompt = f"""Analyze the following resume and cover letter to identify the candidate's key qualifications, skills, experience, and career goals. Then generate 5-7 specific search queries that would be most effective for finding relevant job listings.
+
+RESUME:
+{resume_text[:3000]}
+
+COVER LETTER:
+{cover_letter_text[:2000] if cover_letter_text else "No cover letter provided"}
+
+Please provide your analysis in the following format:
+
+ANALYSIS:
+[Brief summary of the candidate's profile, key skills, experience level, and career goals]
+
+SEARCH QUERIES:
+1. [Query 1]
+2. [Query 2]
+3. [Query 3]
+4. [Query 4]
+5. [Query 5]
+6. [Query 6]
+7. [Query 7]
+
+Make the queries specific and targeted, focusing on the candidate's unique combination of skills and experience."""
+
+            # Call LLM
+            response = client.chat.completions.create(
+                model=openai_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert career advisor and job search specialist. Analyze resumes and cover letters to identify key qualifications and generate effective job search queries.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.7,
+                max_tokens=1500,
+            )
+
+            llm_response = response.choices[0].message.content
+
+            # Extract search queries from LLM response
+            search_queries = []
+            lines = llm_response.split("\n")
+            in_queries_section = False
+            for line in lines:
+                if "SEARCH QUERIES:" in line:
+                    in_queries_section = True
+                    continue
+                if in_queries_section:
+                    # Look for numbered lines
+                    if line.strip() and any(
+                        line.strip().startswith(str(i)) for i in range(1, 10)
+                    ):
+                        # Extract the query (remove the number and any leading punctuation)
+                        query = line.strip()
+                        for i in range(1, 10):
+                            if query.startswith(f"{i}."):
+                                query = query[2:].strip()
+                                break
+                            elif query.startswith(f"{i} "):
+                                query = query[2:].strip()
+                                break
+                        if query:
+                            search_queries.append(query)
+
+            if not search_queries:
+                # Fallback: use the entire response as a single query
+                search_queries = [llm_response]
+
+            logging.info(f"Generated {len(search_queries)} search queries from LLM")
+
+        except Exception as e:
+            logging.error(f"Error calling LLM: {e}")
+            return f"Error analyzing resume with LLM: {str(e)}", None
+
+        # Perform semantic search for each query
+        all_results = {}
+        for query in search_queries:
+            try:
+                results = embedder.search_similar_jobs(query, n_results=n_results)
+                for job in results:
+                    job_id = job["job_id"]
+                    if job_id not in all_results:
+                        all_results[job_id] = {
+                            "job_id": job_id,
+                            "url": job["url"],
+                            "title": job["title"],
+                            "company": job["company"],
+                            "location": job["location"],
+                            "distance": job.get("distance", 0),
+                            "match_count": 0,
+                            "queries_matched": [],
+                        }
+                    all_results[job_id]["match_count"] += 1
+                    all_results[job_id]["queries_matched"].append(query)
+                    # Use the minimum distance (best match)
+                    if job.get("distance", 0) < all_results[job_id]["distance"]:
+                        all_results[job_id]["distance"] = job.get("distance", 0)
+            except Exception as e:
+                logging.error(f"Error searching for query '{query}': {e}")
+                continue
+
+        # Sort by match count (descending) and then by distance (ascending)
+        ranked_jobs = sorted(
+            all_results.values(),
+            key=lambda x: (-x["match_count"], x["distance"]),
+        )
+
+        # Get additional details from database
+        conn = get_db_connection()
+        for job in ranked_jobs:
+            db_job = conn.execute(
+                """
+                SELECT job_description, requirements, benefits, salary
+                FROM jobs WHERE id = ?
+            """,
+                (job["job_id"],),
+            ).fetchone()
+
+            if db_job:
+                job["job_description"] = db_job["job_description"]
+                job["requirements"] = db_job["requirements"]
+                job["benefits"] = db_job["benefits"]
+                job["salary"] = db_job["salary"]
+
+        conn.close()
+
+        if not ranked_jobs:
+            return "No matching jobs found", None
+
+        # Format results as dataframe
+        df = pd.DataFrame(ranked_jobs)
+        logging.info(
+            f"Resume-based search: Found {len(ranked_jobs)} jobs ranked by relevance"
+        )
+
+        # Create summary message
+        summary = f"""✅ Resume Analysis Complete!
+
+{llm_response}
+
+📊 Search Results:
+- Found {len(ranked_jobs)} relevant jobs
+- Ranked by number of matching queries and semantic similarity
+- Top match: {ranked_jobs[0]['title']} at {ranked_jobs[0]['company']}"""
+
+        return summary, df
+
+    except Exception as e:
+        logging.error(f"Error in resume-based job search: {e}")
+        return f"Error: {str(e)}", None
+
+
 # Initialize database on module import
 initialize_database()
 
@@ -1215,6 +1418,37 @@ with gr.Blocks(title="Job Search Manager") as demo:
             gr.Markdown("---")
 
             with gr.Row():
+                gr.Markdown("### AI-Powered Job Matching")
+
+            with gr.Row():
+                gr.Markdown(
+                    "Let an AI analyze your resume and cover letter to find the most relevant jobs. "
+                    "The system will generate targeted search queries and rank job listings by relevance."
+                )
+
+            with gr.Row():
+                n_jobs = gr.Slider(
+                    minimum=5,
+                    maximum=50,
+                    value=10,
+                    step=5,
+                    label="Number of Jobs to Return",
+                )
+                match_jobs_btn = gr.Button(
+                    "🎯 Find Matching Jobs", variant="primary", size="lg"
+                )
+
+            with gr.Row():
+                match_status = gr.Textbox(label="Status", interactive=False, lines=3)
+
+            with gr.Row():
+                match_results = gr.Dataframe(
+                    label="Ranked Job Matches", interactive=False
+                )
+
+            gr.Markdown("---")
+
+            with gr.Row():
                 gr.Markdown("### Tips")
 
             with gr.Row():
@@ -1224,8 +1458,10 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 - **Cover Letter**: Upload your cover letter in PDF, DOCX, DOC, HTML, PPTX, TXT, RST, or image format
                 - **Embed**: Click the embed button to process and store your document in the vector database
                 - **Search**: Use semantic search to find relevant sections in your documents
+                - **AI Matching**: Let AI analyze your documents and find the best job matches automatically
                 - Documents are stored separately from job listings for easy reference
                 - Powered by Docling for accurate text extraction from multiple formats
+                - AI matching requires OpenAI API key (OPENAI_API_KEY or OPENAI_EMBEDDING_API_KEY)
                 """
                 )
 
@@ -1246,6 +1482,12 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 search_user_documents,
                 inputs=[doc_search_input, doc_n_results],
                 outputs=[doc_search_status, doc_search_results],
+            )
+
+            match_jobs_btn.click(
+                analyze_resume_and_rank_jobs,
+                inputs=[n_jobs],
+                outputs=[match_status, match_results],
             )
 
         # Run Commands Tab
