@@ -719,6 +719,9 @@ def process_jobs_from_json(json_file: str = "job_results.json"):
         pending_jobs = db.get_pending_jobs()
         logging.info(f"Found {len(pending_jobs)} jobs to verify")
 
+        # Initialize verification_results to empty list
+        verification_results = []
+
         if pending_jobs:
             # Process jobs with multiprocessing and per-domain rate limiting
             verification_results = process_jobs_multiprocess(
@@ -745,6 +748,8 @@ def process_jobs_from_json(json_file: str = "job_results.json"):
                     logging.warning(
                         f"Job {result['id']} inactive: {result['title']} - {result['message']}"
                     )
+        else:
+            logging.info("No pending jobs to verify")
 
         # Step 3: Embed scraped jobs
         logging.info("Step 3: Embedding scraped jobs")
