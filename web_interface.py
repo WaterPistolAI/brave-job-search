@@ -1235,6 +1235,9 @@ artifact_storage = {
     "current_index": 0,
 }
 
+# Global state for chat greeting
+chat_greeting_state = {"greeting": None}
+
 
 def resume_chat(message, history):
     """
@@ -2022,12 +2025,19 @@ with gr.Blocks(title="Job Search Manager") as demo:
             def embed_resume_and_start_chat(file):
                 """Embed resume and return status to trigger chat start."""
                 status, preview = embed_user_document("resume", file)
-                return status, preview, "Start chat"  # Signal to start chat
+                # Get initial greeting from AI and store in global state
+                greeting, _ = resume_chat("", [])
+                chat_greeting_state["greeting"] = greeting
+                return (
+                    status,
+                    preview,
+                    "Resume embedded! Go to AI Resume Coach tab to start chatting.",
+                )
 
             embed_resume_btn.click(
                 embed_resume_and_start_chat,
                 inputs=[resume_upload],
-                outputs=[resume_status, resume_preview, gr.State()],
+                outputs=[resume_status, resume_preview, resume_status],
             )
 
             embed_cover_letter_btn.click(
@@ -2074,11 +2084,29 @@ with gr.Blocks(title="Job Search Manager") as demo:
             with gr.Row():
                 with gr.Column(scale=2):
                     gr.Markdown("<center><h2>💬 Chat with AI Coach</h2></center>")
-                    chat_interface = gr.ChatInterface(
-                        resume_chat,
-                        additional_outputs=[gr.Code(render=False)],
-                        api_name="chat",
+
+                    # Chat history display
+                    chat_history = gr.Chatbot(
+                        label="Conversation",
+                        height=500,
+                        show_copy_button=True,
                     )
+
+                    # Chat input
+                    with gr.Row():
+                        chat_input = gr.Textbox(
+                            label="Your Message",
+                            placeholder="Type your message here...",
+                            scale=4,
+                            show_label=False,
+                        )
+                        send_btn = gr.Button("Send", variant="primary", scale=1)
+                        start_chat_btn = gr.Button(
+                            "Start Chat", variant="secondary", scale=1
+                        )
+
+                    # Hidden state for chat history
+                    chat_state = gr.State([])
 
                 with gr.Column(scale=1):
                     gr.Markdown("<center><h2>📄 Cover Letter Artifacts</h2></center>")
@@ -2147,8 +2175,75 @@ with gr.Blocks(title="Job Search Manager") as demo:
                 )
 
             # Event handlers
-            chat_interface.additional_outputs[0].render()
-            chat_interface.additional_outputs[0] = cover_letter_artifact
+            def send_message(message, history):
+                """Send a message and get AI response."""
+                if not message or not message.strip():
+                    return history, history
+
+                # Add user message to history
+                history.append((message, None))
+
+                # Get AI response
+                response, artifact = resume_chat(message, history)
+
+                # Add AI response to history
+                history[-1] = (message, response)
+
+                # Update artifact display if there's a new artifact
+                if artifact:
+                    counter, artifact_id, context, content = update_artifact_display(
+                        artifact
+                    )
+                    return history, history, counter, artifact_id, context, content
+
+                return history, history, "No artifacts", "", "", ""
+
+            def start_chat_on_embed():
+                """Auto-start chat when resume is embedded."""
+                # Get initial greeting from AI
+                greeting, _ = resume_chat("", [])
+                return [(None, greeting)]
+
+            # Wire up send button and chat input
+            send_btn.click(
+                send_message,
+                inputs=[chat_input, chat_state],
+                outputs=[
+                    chat_history,
+                    chat_state,
+                    artifact_counter,
+                    artifact_id_display,
+                    artifact_context,
+                    cover_letter_artifact,
+                ],
+            )
+
+            chat_input.submit(
+                send_message,
+                inputs=[chat_input, chat_state],
+                outputs=[
+                    chat_history,
+                    chat_state,
+                    artifact_counter,
+                    artifact_id_display,
+                    artifact_context,
+                    cover_letter_artifact,
+                ],
+            )
+
+            # Wire up Start Chat button to load greeting
+            start_chat_btn.click(
+                lambda: [
+                    (
+                        None,
+                        chat_greeting_state.get(
+                            "greeting",
+                            "Hello! I'm your AI career coach. How can I help you with your resume or cover letter today?",
+                        ),
+                    )
+                ],
+                outputs=[chat_history],
+            )
 
             def update_artifact_display(artifact_dict):
                 """Update artifact display from dictionary."""
