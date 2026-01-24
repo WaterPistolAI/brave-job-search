@@ -12,10 +12,11 @@ from dotenv import load_dotenv
 from scraping_adapters import adapter_registry
 from embedding_adapters import get_embedding_adapter
 from ats_domains import get_expired_indicators, get_domain_config
-from multiprocessing import Process, Queue, Manager
+from multiprocessing.pool import ThreadPool as Pool
 from urllib.parse import urlparse
 import json
 from ratelimit import limits, sleep_and_retry
+from queue import Queue
 
 load_dotenv()
 
@@ -275,36 +276,23 @@ class RateLimiter:
         self.requests_per_minute = requests_per_minute
         # Calculate the minimum period between requests in seconds
         self.min_period = 60 / requests_per_minute
-        # Create a rate-limited request function
-        self._rate_limited_request = self._create_rate_limited_request()
 
-    def _create_rate_limited_request(self):
-        """Create a rate-limited request function."""
-
-        @sleep_and_retry
-        @limits(calls=1, period=int(self.min_period))
-        def _request(url: str) -> Tuple[int, str]:
-            """
-            Make an HTTP request with rate limiting.
-            Returns (status_code, html_content).
-            """
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            }
-
-            response = httpx.get(
-                url, headers=headers, timeout=REQUEST_TIMEOUT, follow_redirects=True
-            )
-
-            return response.status_code, response.text
-
-        return _request
-
+    @sleep_and_retry
+    @limits(calls=1, period=int(60 / 5))  # Default: 5 requests per minute
     def make_request(self, url: str) -> Tuple[int, str]:
         """
-        Make a request with rate limiting.
+        Make an HTTP request with rate limiting.
+        Returns (status_code, html_content).
         """
-        return self._rate_limited_request(url)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+
+        response = httpx.get(
+            url, headers=headers, timeout=REQUEST_TIMEOUT, follow_redirects=True
+        )
+
+        return response.status_code, response.text
 
 
 def verify_job_with_rate_limit(
@@ -551,7 +539,7 @@ def process_jobs_multiprocess(
     jobs: List[Dict], rate_limit: int = GLOBAL_RATE_LIMIT
 ) -> List[Dict]:
     """
-    Process jobs using multiprocessing with per-domain rate limiting.
+    Process jobs using ThreadPool with per-domain rate limiting.
     """
     # Group jobs by domain
     domain_jobs = {}
@@ -567,24 +555,19 @@ def process_jobs_multiprocess(
     # Create a queue for results
     result_queue = Queue()
 
-    # Create a process for each domain
-    processes = []
-    for domain, domain_job_list in domain_jobs.items():
-        rate_limiter = RateLimiter(rate_limit)
-        process = Process(
-            target=process_domain_jobs,
-            args=(domain, domain_job_list, rate_limiter, result_queue),
+    # Create a thread for each domain using ThreadPool
+    with Pool(processes=len(domain_jobs)) as pool:
+        # Submit tasks for each domain
+        pool.starmap(
+            process_domain_jobs,
+            [
+                (domain, domain_job_list, RateLimiter(rate_limit), result_queue)
+                for domain, domain_job_list in domain_jobs.items()
+            ],
         )
-        processes.append(process)
-        process.start()
-        logging.info(f"Started process for domain: {domain}")
-
-    # Wait for all processes to complete
-    all_results = []
-    for process in processes:
-        process.join()
 
     # Collect results from queue
+    all_results = []
     while not result_queue.empty():
         domain, results = result_queue.get()
         all_results.extend(results)
