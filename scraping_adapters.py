@@ -975,7 +975,30 @@ class LevelsFYIAdapter(BaseScraperAdapter):
         self.domain = "levels.fyi"
 
     def can_handle(self, url: str) -> bool:
-        return "levels.fyi" in url
+        # Only handle URLs that are exactly /jobs or /jobs with query parameters
+        # Exclude /jobs/title, /jobs/company, etc.
+        if "levels.fyi" not in url:
+            return False
+
+        # Extract the path from the URL
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        path = parsed.path
+
+        # Only match /jobs or /jobs/ (with or without query parameters)
+        # Exclude paths like /jobs/title, /jobs/company, etc.
+        if path == "/jobs" or path == "/jobs/":
+            return True
+
+        # Also allow /jobs with query parameters (e.g., /jobs?jobId=123)
+        if path.startswith("/jobs") and (path == "/jobs" or "?" in url):
+            # Check if there's a path segment after /jobs
+            path_parts = path.rstrip("/").split("/")
+            if len(path_parts) == 2 and path_parts[1] == "jobs":
+                return True
+
+        return False
 
     def scrape(self, soup: BeautifulSoup, url: str) -> Dict:
         details = {
@@ -989,7 +1012,7 @@ class LevelsFYIAdapter(BaseScraperAdapter):
 
         # Levels.fyi job pages have a specific structure
         # Check if this is a job page (has jobId parameter)
-        is_job_page = "jobId" in url or "/jobs" in url
+        is_job_page = "jobId" in url
 
         if is_job_page:
             # Extract company name and location from the details row

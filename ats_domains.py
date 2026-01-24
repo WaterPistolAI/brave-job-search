@@ -105,6 +105,7 @@ SUPPORTED_ATS_DOMAINS = {
                 "case_sensitive": False,
             },
         ],
+        "restrict_to_path": "/jobs",
     },
 }
 
