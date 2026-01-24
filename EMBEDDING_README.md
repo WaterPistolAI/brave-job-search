@@ -15,6 +15,7 @@ The job search system supports multiple embedding providers through a flexible a
 
 ### 2. OpenAI-Compatible Embeddings
 - **Provider**: `openai`
+- **Implementation**: Uses the official OpenAI Python package
 - **Models**: 
   - `text-embedding-3-small` (1536 dimensions)
   - `text-embedding-3-large` (3072 dimensions)
@@ -22,6 +23,10 @@ The job search system supports multiple embedding providers through a flexible a
 - **Cost**: Based on OpenAI pricing
 - **Speed**: Fast (API-based)
 - **Privacy**: Data sent to API endpoint
+- **Features**: 
+  - Full support for custom base URLs
+  - Support for custom dimensions (text-embedding-3 models)
+  - Compatible with any OpenAI-compatible API
 
 ## Configuration
 

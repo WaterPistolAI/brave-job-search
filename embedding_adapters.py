@@ -52,7 +52,7 @@ class LocalEmbeddingAdapter(BaseEmbeddingAdapter):
 
 
 class OpenAIEmbeddingAdapter(BaseEmbeddingAdapter):
-    """OpenAI-compatible embeddings using ChromaDB's OpenAIEmbeddingFunction."""
+    """OpenAI-compatible embeddings using the OpenAI Python package."""
 
     def __init__(
         self,
@@ -62,11 +62,11 @@ class OpenAIEmbeddingAdapter(BaseEmbeddingAdapter):
         dimension: int = None,
     ):
         try:
-            from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+            from openai import OpenAI
         except ImportError:
             raise ImportError(
-                "chromadb is required for OpenAI embeddings. "
-                "Install it with: pip install chromadb"
+                "openai is required for OpenAI embeddings. "
+                "Install it with: pip install openai"
             )
 
         # Check for OPENAI_EMBEDDING_API_KEY first, then fall back to OPENAI_API_KEY
@@ -95,39 +95,20 @@ class OpenAIEmbeddingAdapter(BaseEmbeddingAdapter):
             or os.environ.get("OPENAI_MODEL", "text-embedding-3-small")
         )
 
-        # Initialize the embedding function
-        kwargs = {
-            "api_key": self.api_key,
-            "model_name": self.model_name,
-        }
+        # Initialize the OpenAI client
+        client_kwargs = {"api_key": self.api_key}
 
-        # Try to use openai_api_base if supported, otherwise ignore base_url
-        # Some versions of ChromaDB don't support custom base URLs
+        # Set base_url if provided
         if self.base_url:
-            try:
-                # Try with openai_api_base parameter
-                test_kwargs = kwargs.copy()
-                test_kwargs["openai_api_base"] = self.base_url
-                self.embedding_function = OpenAIEmbeddingFunction(**test_kwargs)
-            except TypeError:
-                # If openai_api_base is not supported, initialize without it
-                # and log a warning
-                import logging
+            client_kwargs["base_url"] = self.base_url
 
-                logging.warning(
-                    "OpenAIEmbeddingFunction does not support custom base_url in this version. "
-                    "Using default OpenAI endpoint. To use a custom endpoint, set OPENAI_API_BASE_URL "
-                    "environment variable and use the OpenAI client directly."
-                )
-                self.embedding_function = OpenAIEmbeddingFunction(**kwargs)
-        else:
-            self.embedding_function = OpenAIEmbeddingFunction(**kwargs)
+        self.client = OpenAI(**client_kwargs)
 
         # Set dimension based on model or custom dimension
         if dimension is not None:
             self._dimension = dimension
         else:
-            self._dimension = self._get_model_dimension(model_name)
+            self._dimension = self._get_model_dimension(self.model_name)
 
     def _get_model_dimension(self, model_name: str) -> int:
         """Get the dimension for a given OpenAI model."""
@@ -140,7 +121,30 @@ class OpenAIEmbeddingAdapter(BaseEmbeddingAdapter):
 
     def embed(self, texts: List[str]) -> List[List[float]]:
         """Embed a list of texts using OpenAI's API."""
-        embeddings = self.embedding_function(texts)
+        embeddings = []
+
+        # Process texts in batches to handle multiple inputs
+        for text in texts:
+            # Prepare request parameters
+            request_params = {
+                "model": self.model_name,
+                "input": text,
+                "encoding_format": "float",
+            }
+
+            # Add dimensions parameter for text-embedding-3 models if custom dimension is set
+            if self.model_name.startswith(
+                "text-embedding-3"
+            ) and self._dimension != self._get_model_dimension(self.model_name):
+                request_params["dimensions"] = self._dimension
+
+            # Call the OpenAI API
+            response = self.client.embeddings.create(**request_params)
+
+            # Extract the embedding vector
+            embedding = response.data[0].embedding
+            embeddings.append(embedding)
+
         return embeddings
 
     def get_dimension(self) -> int:
